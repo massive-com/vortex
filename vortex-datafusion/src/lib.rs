@@ -12,7 +12,7 @@ use datafusion::physical_expr::PhysicalExprRef;
 use datafusion::physical_plan::expressions::{BinaryExpr, Column, LikeExpr, Literal};
 use vortex::stats::Precision;
 
-mod convert;
+pub mod convert;
 mod persistent;
 
 pub use persistent::*;
