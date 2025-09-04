@@ -59,7 +59,7 @@ impl Debug for VortexFormat {
 }
 
 /// Options to configure the [`VortexFormat`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VortexFormatOptions {
     /// The size of the in-memory [`vortex::file::Footer`] cache.
     pub footer_cache_size_mb: usize,
