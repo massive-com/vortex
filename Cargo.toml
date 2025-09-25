@@ -86,15 +86,15 @@ crossbeam-deque = "0.8.6"
 crossbeam-queue = "0.3.12"
 crossterm = "0.29"
 dashmap = "6.1.0"
-datafusion = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d", default-features = false }
-datafusion-catalog = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
-datafusion-common = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
-datafusion-common-runtime = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
-datafusion-datasource = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d", default-features = false }
-datafusion-execution = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
-datafusion-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
-datafusion-physical-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
-datafusion-physical-plan = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "faca92d" }
+datafusion = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2", default-features = false }
+datafusion-catalog = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
+datafusion-common = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
+datafusion-common-runtime = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
+datafusion-datasource = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2", default-features = false }
+datafusion-execution = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
+datafusion-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
+datafusion-physical-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
+datafusion-physical-plan = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "055e9c2" }
 dirs = "6.0.0"
 divan = { package = "codspeed-divan-compat", version = "3.0" }
 dyn-hash = "0.2.0"
