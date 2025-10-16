@@ -87,17 +87,17 @@ crossbeam-deque = "0.8.6"
 crossbeam-queue = "0.3.12"
 crossterm = "0.29"
 dashmap = "6.1.0"
-datafusion = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780", default-features = false }
-datafusion-catalog = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-common = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-common-runtime = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-datasource = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780", default-features = false }
-datafusion-execution = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-physical-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-physical-expr-adapter = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-physical-expr-common = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
-datafusion-physical-plan = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "d799780" }
+datafusion = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab", default-features = false }
+datafusion-catalog = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-common = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-common-runtime = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-datasource = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab", default-features = false }
+datafusion-execution = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-physical-expr = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-physical-expr-adapter = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-physical-expr-common = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
+datafusion-physical-plan = { git = "https://github.com/polygon-io/arrow-datafusion", rev = "ab03bab" }
 dirs = "6.0.0"
 divan = { package = "codspeed-divan-compat", version = "3.0" }
 dyn-hash = "0.2.0"
