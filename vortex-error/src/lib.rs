@@ -430,7 +430,7 @@ macro_rules! vortex_bail {
 #[macro_export]
 macro_rules! vortex_ensure {
     ($cond:expr) => {
-        vortex_ensure!($cond, stringify!($cond));
+        vortex_ensure!($cond, AssertionFailed: "{}", stringify!($cond));
     };
     ($cond:expr, $($tt:tt)*) => {
         if !$cond {
@@ -515,7 +515,11 @@ impl From<jiff::Error> for VortexError {
 #[cfg(feature = "tokio")]
 impl From<tokio::task::JoinError> for VortexError {
     fn from(value: tokio::task::JoinError) -> Self {
-        VortexError::JoinError(value, Box::new(Backtrace::capture()))
+        if value.is_panic() {
+            std::panic::resume_unwind(value.into_panic())
+        } else {
+            VortexError::JoinError(value, Box::new(Backtrace::capture()))
+        }
     }
 }
 

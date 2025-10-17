@@ -25,13 +25,14 @@ impl StatsSet {
     /// # Safety
     ///
     /// This method will not panic or trigger UB, but may lead to duplicate stats being stored.
-    pub fn new_unchecked(values: Vec<(Stat, Precision<ScalarValue>)>) -> Self {
+    pub unsafe fn new_unchecked(values: Vec<(Stat, Precision<ScalarValue>)>) -> Self {
         Self { values }
     }
 
     /// Create StatsSet from single stat and value
     pub fn of(stat: Stat, value: Precision<ScalarValue>) -> Self {
-        Self::new_unchecked(vec![(stat, value)])
+        // SAFETY: No duplicate stats will be set here.
+        unsafe { Self::new_unchecked(vec![(stat, value)]) }
     }
 
     fn reserve_full_capacity(&mut self) {
@@ -79,14 +80,6 @@ impl StatsSet {
     /// Only keep given stats
     pub fn retain_only(&mut self, stats: &[Stat]) {
         self.values.retain(|(s, _)| stats.contains(s));
-    }
-
-    /// Keep given stats as inexact values
-    pub fn keep_inexact_stats(self, inexact_keep: &[Stat]) -> Self {
-        self.values
-            .into_iter()
-            .filter_map(|(s, v)| inexact_keep.contains(&s).then(|| (s, v.into_inexact())))
-            .collect()
     }
 
     /// Iterate over the statistic names and values in-place.
@@ -537,10 +530,13 @@ mod test {
 
     #[test]
     fn test_iter() {
-        let set = StatsSet::new_unchecked(vec![
-            (Stat::Max, Precision::exact(100)),
-            (Stat::Min, Precision::exact(42)),
-        ]);
+        // SAFETY: No duplicate stats.
+        let set = unsafe {
+            StatsSet::new_unchecked(vec![
+                (Stat::Max, Precision::exact(100)),
+                (Stat::Min, Precision::exact(42)),
+            ])
+        };
         let mut iter = set.iter();
         let first = iter.next().unwrap().clone();
         assert_eq!(first.0, Stat::Max);
@@ -561,10 +557,13 @@ mod test {
 
     #[test]
     fn into_iter() {
-        let mut set = StatsSet::new_unchecked(vec![
-            (Stat::Max, Precision::exact(100)),
-            (Stat::Min, Precision::exact(42)),
-        ])
+        // SAFETY: No duplicate stats.
+        let mut set = unsafe {
+            StatsSet::new_unchecked(vec![
+                (Stat::Max, Precision::exact(100)),
+                (Stat::Min, Precision::exact(42)),
+            ])
+        }
         .into_iter();
         let (stat, first) = set.next().unwrap();
         assert_eq!(stat, Stat::Max);
@@ -897,30 +896,6 @@ mod test {
             merged_ref.get_as::<i32>(Stat::Min),
             Some(Precision::inexact(4))
         );
-    }
-
-    #[test]
-    fn retain_approx() {
-        let set = StatsSet::from_iter([
-            (Stat::Max, Precision::exact(100)),
-            (Stat::Min, Precision::exact(50)),
-            (Stat::Sum, Precision::inexact(10)),
-        ]);
-
-        let set = set.keep_inexact_stats(&[Stat::Min, Stat::Max]);
-
-        let set_ref = set.as_typed_ref(&DType::Primitive(PType::I32, Nullability::NonNullable));
-
-        assert_eq!(set.len(), 2);
-        assert_eq!(
-            set_ref.get_as::<i32>(Stat::Max),
-            Some(Precision::inexact(100))
-        );
-        assert_eq!(
-            set_ref.get_as::<i32>(Stat::Min),
-            Some(Precision::inexact(50))
-        );
-        assert_eq!(set_ref.get_as::<i32>(Stat::Sum), None);
     }
 
     #[test]

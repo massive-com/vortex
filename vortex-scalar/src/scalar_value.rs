@@ -8,12 +8,13 @@ use bytes::BufMut;
 use itertools::Itertools;
 use prost::Message;
 use vortex_buffer::{BufferString, ByteBuffer};
+use vortex_dtype::NativeDType;
 use vortex_error::{VortexResult, VortexUnwrap, vortex_bail, vortex_err};
 use vortex_proto::scalar as pb;
 
 use crate::decimal::DecimalValue;
 use crate::pvalue::PValue;
-use crate::{Scalar, ScalarType, i256};
+use crate::{Scalar, i256};
 
 /// Represents the internal data of a scalar value. Must be interpreted by wrapping up with a
 /// [`vortex_dtype::DType`] to make a [`super::Scalar`].
@@ -28,7 +29,7 @@ pub struct ScalarValue(pub(crate) InnerScalarValue);
 /// implementation for all `Option<T>` to simply be a nullable `T`.
 impl<T> From<Option<T>> for ScalarValue
 where
-    T: ScalarType,
+    T: NativeDType,
     ScalarValue: From<T>,
 {
     fn from(value: Option<T>) -> Self {
@@ -40,7 +41,7 @@ where
 
 impl<T> From<Vec<T>> for ScalarValue
 where
-    T: ScalarType,
+    T: NativeDType,
     Scalar: From<T>,
 {
     /// Converts a vector into a `ScalarValue` (specifically a `ListScalar`).
@@ -149,82 +150,91 @@ impl ScalarValue {
     }
 
     /// Returns true if this is a null value.
+    #[inline]
     pub fn is_null(&self) -> bool {
         self.0.is_null()
     }
 
     /// Returns scalar as a null value
+    #[inline]
     pub(crate) fn as_null(&self) -> VortexResult<()> {
         self.0.as_null()
     }
 
     /// Returns scalar as a boolean value
+    #[inline]
     pub(crate) fn as_bool(&self) -> VortexResult<Option<bool>> {
         self.0.as_bool()
     }
 
     /// Return scalar as a primitive value. PValues don't match dtypes but will be castable to the scalars dtype
+    #[inline]
     pub(crate) fn as_pvalue(&self) -> VortexResult<Option<PValue>> {
         self.0.as_pvalue()
     }
 
     /// Returns scalar as a decimal value
+    #[inline]
     pub(crate) fn as_decimal(&self) -> VortexResult<Option<DecimalValue>> {
         self.0.as_decimal()
     }
 
     /// Returns scalar as a binary buffer
+    #[inline]
     pub(crate) fn as_buffer(&self) -> VortexResult<Option<Arc<ByteBuffer>>> {
         self.0.as_buffer()
     }
 
     /// Returns scalar as a string buffer
+    #[inline]
     pub(crate) fn as_buffer_string(&self) -> VortexResult<Option<Arc<BufferString>>> {
         self.0.as_buffer_string()
     }
 
     /// Returns scalar as a list value
+    #[inline]
     pub(crate) fn as_list(&self) -> VortexResult<Option<&Arc<[ScalarValue]>>> {
         self.0.as_list()
     }
 }
 
 impl InnerScalarValue {
+    #[inline]
     pub(crate) fn is_null(&self) -> bool {
         matches!(self, InnerScalarValue::Null)
     }
 
+    #[inline]
     pub(crate) fn as_null(&self) -> VortexResult<()> {
         if matches!(self, InnerScalarValue::Null) {
             Ok(())
         } else {
-            Err(vortex_err!("Expected a Null scalar, found {:?}", self))
+            Err(vortex_err!("Expected a Null scalar, found {self}"))
         }
     }
 
+    #[inline]
     pub(crate) fn as_bool(&self) -> VortexResult<Option<bool>> {
-        if matches!(&self, InnerScalarValue::Null) {
-            Ok(None)
-        } else if let InnerScalarValue::Bool(b) = &self {
-            Ok(Some(*b))
-        } else {
-            Err(vortex_err!("Expected a bool scalar, found {:?}", self))
+        match self {
+            InnerScalarValue::Null => Ok(None),
+            InnerScalarValue::Bool(b) => Ok(Some(*b)),
+            other => Err(vortex_err!("Expected a bool scalar, found {other}",)),
         }
     }
 
     /// FIXME(ngates): PValues are such a footgun... we should probably remove this.
     ///  But the other accessors can sometimes be useful? e.g. as_buffer. But maybe we just force
     ///  the user to switch over Utf8 and Binary and use the correct Scalar wrapper?
+    #[inline]
     pub(crate) fn as_pvalue(&self) -> VortexResult<Option<PValue>> {
-        if matches!(&self, InnerScalarValue::Null) {
-            Ok(None)
-        } else if let InnerScalarValue::Primitive(p) = &self {
-            Ok(Some(*p))
-        } else {
-            Err(vortex_err!("Expected a primitive scalar, found {:?}", self))
+        match self {
+            InnerScalarValue::Null => Ok(None),
+            InnerScalarValue::Primitive(pvalue) => Ok(Some(*pvalue)),
+            other => Err(vortex_err!("Expected a primitive scalar, found {other}")),
         }
     }
 
+    #[inline]
     pub(crate) fn as_decimal(&self) -> VortexResult<Option<DecimalValue>> {
         match self {
             InnerScalarValue::Null => Ok(None),
@@ -242,6 +252,7 @@ impl InnerScalarValue {
         }
     }
 
+    #[inline]
     pub(crate) fn as_buffer(&self) -> VortexResult<Option<Arc<ByteBuffer>>> {
         match &self {
             InnerScalarValue::Null => Ok(None),
@@ -253,6 +264,7 @@ impl InnerScalarValue {
         }
     }
 
+    #[inline]
     pub(crate) fn as_buffer_string(&self) -> VortexResult<Option<Arc<BufferString>>> {
         match &self {
             InnerScalarValue::Null => Ok(None),
@@ -264,6 +276,7 @@ impl InnerScalarValue {
         }
     }
 
+    #[inline]
     pub(crate) fn as_list(&self) -> VortexResult<Option<&Arc<[ScalarValue]>>> {
         match &self {
             InnerScalarValue::Null => Ok(None),

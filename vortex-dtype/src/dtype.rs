@@ -77,9 +77,6 @@ pub enum DType {
     ///
     /// This is parameterized by a `DType` that represents the element type of the inner lists, as
     /// well as a `u32` size that determines the fixed length of each `FixedSizeList` scalar.
-    ///
-    /// This variant has not yet been implemented. Please add a comment with
-    /// `TODO(connor)[FixedSizeList]` if you need to match against `DType`.
     FixedSizeList(Arc<DType>, u32, Nullability),
 
     /// A logical struct type.
@@ -92,6 +89,18 @@ pub enum DType {
     ///
     /// See [`ExtDType`] for more information.
     Extension(Arc<ExtDType>),
+}
+
+/// This trait is implemented by native Rust types that can be converted
+/// to and from Vortex scalar values.
+/// e.g. `&str` -> `DType::Utf8`
+///      `bool` -> `DType::Bool`
+///
+/// The dtype is the one closet matching the domain of the rust type
+/// e.g. `Option<T>` -> Nullable DType.
+pub trait NativeDType {
+    /// Returns the Vortex data type for this scalar type.
+    fn dtype() -> DType;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -306,6 +315,16 @@ impl DType {
         matches!(self, Extension(_))
     }
 
+    /// Check if `self` is a nested type, i.e. list, fixed size list, struct, or extension of a
+    /// recursive type.
+    pub fn is_nested(&self) -> bool {
+        match self {
+            List(..) | FixedSizeList(..) | Struct(..) => true,
+            Extension(ext) => ext.storage_dtype().is_nested(),
+            _ => false,
+        }
+    }
+
     /// Check returns the inner decimal type if the dtype is a [`DType::Decimal`].
     pub fn as_decimal_opt(&self) -> Option<&DecimalDType> {
         if let Decimal(decimal, _) = self {
@@ -315,12 +334,35 @@ impl DType {
         }
     }
 
-    /// Get the inner element dtype if `self` is a [`DType::List`] or [`DType::FixedSizeList`],
-    /// otherwise returns `None`
+    /// Get the inner element dtype if `self` is a [`DType::List`], otherwise returns `None`.
+    ///
+    /// Note that this does _not_ return `Some` if `self` is a [`DType::FixedSizeList`].
     pub fn as_list_element_opt(&self) -> Option<&Arc<DType>> {
         if let List(edt, _) = self {
             Some(edt)
-        } else if let FixedSizeList(edt, ..) = self {
+        } else {
+            None
+        }
+    }
+
+    /// Get the inner element dtype if `self` is a [`DType::FixedSizeList`], otherwise returns
+    /// `None`.
+    ///
+    /// Note that this does _not_ return `Some` if `self` is a [`DType::List`].
+    pub fn as_fixed_size_list_element_opt(&self) -> Option<&Arc<DType>> {
+        if let FixedSizeList(edt, ..) = self {
+            Some(edt)
+        } else {
+            None
+        }
+    }
+
+    /// Get the inner element dtype if `self` is **either** a [`DType::List`] or a
+    /// [`DType::FixedSizeList`], otherwise returns `None`
+    pub fn as_any_size_list_element_opt(&self) -> Option<&Arc<DType>> {
+        if let FixedSizeList(edt, ..) = self {
+            Some(edt)
+        } else if let List(edt, ..) = self {
             Some(edt)
         } else {
             None

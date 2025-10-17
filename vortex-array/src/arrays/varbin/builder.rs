@@ -2,29 +2,29 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use arrow_buffer::NullBufferBuilder;
-use num_traits::{AsPrimitive, PrimInt};
+use num_traits::AsPrimitive;
 use vortex_buffer::BufferMut;
-use vortex_dtype::{DType, NativePType};
-use vortex_error::{VortexExpect as _, vortex_panic};
+use vortex_dtype::{DType, IntegerPType};
+use vortex_error::vortex_panic;
 
 use crate::IntoArray;
 use crate::arrays::primitive::PrimitiveArray;
 use crate::arrays::varbin::VarBinArray;
 use crate::validity::Validity;
 
-pub struct VarBinBuilder<O: NativePType> {
+pub struct VarBinBuilder<O: IntegerPType> {
     offsets: BufferMut<O>,
     data: BufferMut<u8>,
     validity: NullBufferBuilder,
 }
 
-impl<O: NativePType + PrimInt> Default for VarBinBuilder<O> {
+impl<O: IntegerPType> Default for VarBinBuilder<O> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<O: NativePType + PrimInt> VarBinBuilder<O> {
+impl<O: IntegerPType> VarBinBuilder<O> {
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
@@ -98,13 +98,19 @@ impl<O: NativePType + PrimInt> VarBinBuilder<O> {
             Validity::NonNullable
         };
 
-        VarBinArray::try_new(offsets.into_array(), self.data.freeze(), dtype, validity)
-            .vortex_expect("Unexpected error while building VarBinArray")
+        // SAFETY: The builder maintains all invariants:
+        // - Offsets are monotonically increasing starting from 0 (guaranteed by builder logic).
+        // - Bytes buffer contains exactly the data referenced by offsets.
+        // - Validity matches the dtype nullability.
+        // - UTF-8 validity is ensured by the caller when using DType::Utf8.
+        unsafe {
+            VarBinArray::new_unchecked(offsets.into_array(), self.data.freeze(), dtype, validity)
+        }
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use vortex_dtype::DType;
     use vortex_dtype::Nullability::Nullable;
     use vortex_scalar::Scalar;

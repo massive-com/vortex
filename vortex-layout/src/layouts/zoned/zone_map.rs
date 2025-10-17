@@ -6,7 +6,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use vortex_array::arrays::StructArray;
 use vortex_array::compute::sum;
-use vortex_array::stats::{Precision, Stat, StatsSet};
+use vortex_array::stats::{Precision, Stat, StatsProvider, StatsSet};
 use vortex_array::validity::Validity;
 use vortex_array::{Array, ArrayRef};
 use vortex_dtype::{DType, Nullability, PType, StructFields};
@@ -42,11 +42,18 @@ impl ZoneMap {
         if &expected_dtype != array.dtype() {
             vortex_bail!("Array dtype does not match expected zone map dtype: {expected_dtype}");
         }
-        Ok(Self::new_unchecked(array, stats))
+
+        // SAFETY: We checked that the
+        Ok(unsafe { Self::new_unchecked(array, stats) })
     }
 
     /// Creates [`ZoneMap`] without validating return array against expected stats.
-    pub fn new_unchecked(array: StructArray, stats: Arc<[Stat]>) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// Assumes that the input struct array has the correct statistics as fields. Or in other words,
+    /// the [`DType`] of the input array is equal to the result of [`Self::dtype_for_stats_table`].
+    pub unsafe fn new_unchecked(array: StructArray, stats: Arc<[Stat]>) -> Self {
         Self { array, stats }
     }
 
@@ -169,6 +176,18 @@ impl StatsAccumulator {
         }
     }
 
+    pub fn push_chunk_without_compute(&mut self, array: &dyn Array) -> VortexResult<()> {
+        for builder in self.builders.iter_mut() {
+            if let Some(Precision::Exact(v)) = array.statistics().get(builder.stat()) {
+                builder.append_scalar(v.cast(&v.dtype().as_nullable())?)?;
+            } else {
+                builder.append_null();
+            }
+        }
+        self.length += 1;
+        Ok(())
+    }
+
     pub fn push_chunk(&mut self, array: &dyn Array) -> VortexResult<()> {
         for builder in self.builders.iter_mut() {
             if let Some(v) = array.statistics().compute_stat(builder.stat())? {
@@ -259,10 +278,10 @@ mod tests {
         assert_eq!(
             stats_table.array.names().as_ref(),
             &[
-                Stat::Max.name().into(),
-                MAX_IS_TRUNCATED.into(),
-                Stat::Min.name().into(),
-                MIN_IS_TRUNCATED.into(),
+                Stat::Max.name(),
+                MAX_IS_TRUNCATED,
+                Stat::Min.name(),
+                MIN_IS_TRUNCATED,
             ]
         );
         assert_eq!(
@@ -284,11 +303,11 @@ mod tests {
         assert_eq!(
             stats_table.array.names().as_ref(),
             &[
-                Stat::Max.name().into(),
-                MAX_IS_TRUNCATED.into(),
-                Stat::Min.name().into(),
-                MIN_IS_TRUNCATED.into(),
-                Stat::Sum.name().into(),
+                Stat::Max.name(),
+                MAX_IS_TRUNCATED,
+                Stat::Min.name(),
+                MIN_IS_TRUNCATED,
+                Stat::Sum.name(),
             ]
         );
         assert_eq!(

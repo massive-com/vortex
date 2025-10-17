@@ -19,6 +19,7 @@ use vortex_error::{VortexExpect, VortexUnwrap, vortex_panic};
 use vortex_expr::{Scope, lit, root};
 use vortex_file::{VortexOpenOptions, VortexWriteOptions};
 use vortex_fuzz::FuzzFileAction;
+use vortex_io::runtime::single::SingleThreadRuntime;
 use vortex_utils::aliases::DefaultHashBuilder;
 use vortex_utils::aliases::hash_set::HashSet;
 
@@ -49,18 +50,20 @@ fuzz_target!(|fuzz: FuzzFileAction| -> Corpus {
             .vortex_unwrap()
     };
 
-    let full_buff = VortexWriteOptions::default()
-        .write_blocking(ByteBufferMut::empty(), array_data.to_array_stream())
+    let mut full_buff = ByteBufferMut::empty();
+    let _footer = VortexWriteOptions::default()
+        .blocking::<SingleThreadRuntime>()
+        .write(&mut full_buff, array_data.to_array_iterator())
         .vortex_unwrap();
 
-    let mut output = VortexOpenOptions::in_memory()
-        .open(full_buff)
+    let mut output = VortexOpenOptions::new()
+        .open_buffer(full_buff)
         .vortex_unwrap()
         .scan()
         .vortex_unwrap()
         .with_projection(projection_expr.unwrap_or_else(|| root()))
         .with_some_filter(filter_expr)
-        .into_array_iter()
+        .into_array_iter(&SingleThreadRuntime::default())
         .vortex_unwrap()
         .try_collect::<_, Vec<_>, _>()
         .vortex_unwrap();

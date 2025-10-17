@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use vortex_array::arrays::{VarBinArray, VarBinViewArray, VarBinViewVTable};
+use vortex_array::arrays::{
+    ConstantArray, MaskedArray, VarBinArray, VarBinViewArray, VarBinViewVTable,
+};
 use vortex_array::vtable::ValidityHelper;
 use vortex_array::{ArrayRef, IntoArray, ToCanonical};
 use vortex_dict::DictArray;
 use vortex_dict::builders::dict_encode;
 use vortex_error::{VortexExpect, VortexResult};
 use vortex_fsst::{FSSTArray, fsst_compress, fsst_train_compressor};
+use vortex_scalar::Scalar;
 use vortex_utils::aliases::hash_set::HashSet;
 
 use crate::integer::IntCompressor;
@@ -17,12 +20,12 @@ use crate::{
     estimate_compression_ratio_with_sampling, integer,
 };
 
+/// Array of variable-length byte arrays, and relevant stats for compression.
 #[derive(Clone, Debug)]
 pub struct StringStats {
     src: VarBinViewArray,
     estimated_distinct_count: u32,
     value_count: u32,
-    // null_count: u32,
 }
 
 /// Estimate the number of distinct strings in the var bin view array.
@@ -77,6 +80,7 @@ impl CompressorStats for StringStats {
     }
 }
 
+/// [`Compressor`] for strings.
 pub struct StringCompressor;
 
 impl Compressor for StringCompressor {
@@ -85,7 +89,12 @@ impl Compressor for StringCompressor {
     type StatsType = StringStats;
 
     fn schemes() -> &'static [&'static Self::SchemeType] {
-        &[&UncompressedScheme, &DictScheme, &FSSTScheme]
+        &[
+            &UncompressedScheme,
+            &DictScheme,
+            &FSSTScheme,
+            &ConstantScheme,
+        ]
     }
 
     fn default_scheme() -> &'static Self::SchemeType {
@@ -110,12 +119,16 @@ pub struct DictScheme;
 #[derive(Debug, Copy, Clone)]
 pub struct FSSTScheme;
 
+#[derive(Debug, Copy, Clone)]
+pub struct ConstantScheme;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct StringCode(u8);
 
 const UNCOMPRESSED_SCHEME: StringCode = StringCode(0);
 const DICT_SCHEME: StringCode = StringCode(1);
 const FSST_SCHEME: StringCode = StringCode(2);
+const CONSTANT_SCHEME: StringCode = StringCode(3);
 
 impl Scheme for UncompressedScheme {
     type StatsType = StringStats;
@@ -263,6 +276,65 @@ impl Scheme for FSSTScheme {
         )?;
 
         Ok(fsst.into_array())
+    }
+}
+
+impl Scheme for ConstantScheme {
+    type StatsType = StringStats;
+    type CodeType = StringCode;
+
+    fn code(&self) -> Self::CodeType {
+        CONSTANT_SCHEME
+    }
+
+    fn is_constant(&self) -> bool {
+        true
+    }
+
+    fn expected_compression_ratio(
+        &self,
+        stats: &Self::StatsType,
+        is_sample: bool,
+        _allowed_cascading: usize,
+        _excludes: &[Self::CodeType],
+    ) -> VortexResult<f64> {
+        if is_sample {
+            return Ok(0.0);
+        }
+
+        if stats.estimated_distinct_count > 1 || !stats.src.is_constant() {
+            return Ok(0.0);
+        }
+
+        // Force constant is these cases
+        Ok(f64::MAX)
+    }
+
+    fn compress(
+        &self,
+        stats: &Self::StatsType,
+        _is_sample: bool,
+        _allowed_cascading: usize,
+        _excludes: &[Self::CodeType],
+    ) -> VortexResult<ArrayRef> {
+        let scalar_idx = (0..stats.source().len()).position(|idx| stats.source().is_valid(idx));
+
+        match scalar_idx {
+            Some(idx) => {
+                let scalar = stats.source().scalar_at(idx);
+                let const_arr = ConstantArray::new(scalar, stats.src.len()).into_array();
+                if !stats.source().all_valid() {
+                    Ok(MaskedArray::try_new(const_arr, stats.src.validity().clone())?.into_array())
+                } else {
+                    Ok(const_arr)
+                }
+            }
+            None => Ok(ConstantArray::new(
+                Scalar::null(stats.src.dtype().clone()),
+                stats.src.len(),
+            )
+            .into_array()),
+        }
     }
 }
 

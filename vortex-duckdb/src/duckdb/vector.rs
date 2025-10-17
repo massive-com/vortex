@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::ptr;
 
 use arrow_buffer;
 use arrow_buffer::Buffer;
 use bitvec::macros::internal::funty::Fundamental;
 use bitvec::slice::BitSlice;
+use bitvec::view::BitView;
 use vortex::error::{VortexResult, VortexUnwrap, vortex_bail, vortex_err};
 
-use crate::cpp::duckdb_vx_error;
-use crate::duckdb::data::Data;
+use crate::cpp::{duckdb_vx_error, idx_t};
+use crate::duckdb::vector_buffer::VectorBuffer;
 use crate::duckdb::{LogicalType, SelectionVector, Value};
 use crate::{cpp, wrapper};
 
@@ -33,31 +34,50 @@ wrapper!(Vector, cpp::duckdb_vector, cpp::duckdb_destroy_vector);
 unsafe impl Send for Vector {}
 
 impl Vector {
+    /// Create a new vector with the given type.
+    pub fn new(logical_type: LogicalType) -> Self {
+        unsafe { Self::own(cpp::duckdb_create_vector(logical_type.as_ptr(), 0)) }
+    }
+
     /// Create a new vector with the given type and capacity.
     pub fn with_capacity(logical_type: LogicalType, len: usize) -> Self {
         unsafe { Self::own(cpp::duckdb_create_vector(logical_type.as_ptr(), len as _)) }
     }
 
-    /// Append value to the vector.
+    /// Converts the vector is a constant vector with every element `value`.
     pub fn reference_value(&mut self, value: &Value) {
         unsafe {
             cpp::duckdb_vector_reference_value(self.as_ptr(), value.as_ptr());
         }
     }
 
-    /// Copy values from other vector to this vector.
+    /// Reference the data from another vector.
+    ///
+    /// After calling this, both vectors share ownership of the same underlying data.
     pub fn reference(&mut self, other: &Vector) {
         unsafe { cpp::duckdb_vector_reference_vector(self.as_ptr(), other.as_ptr()) }
     }
 
-    /// Slice the vector to a new dictionary vector, using the current vector's values and
-    /// the provided selection vector.
-    pub fn slice_to_dictionary(&mut self, sel_vec: SelectionVector, sel_vec_length: usize) {
+    /// Creates a dictionary vector for a given values vector and selection vector.
+    ///
+    /// A dictionary holds a strong reference to all memory it uses.
+    ///
+    /// `dictionary` differs from `slice_to_dictionary` in that it initializes hash caching.
+    /// See: <https://github.com/duckdb/duckdb/blob/0dcf633f603a629981d089202f93b9080cb1a3e9/src/common/types/vector.cpp#L293>
+    pub fn dictionary(
+        &self,
+        dict: &Vector,
+        dictionary_size: usize,
+        sel_vec: &SelectionVector,
+        count: usize,
+    ) {
         unsafe {
-            cpp::duckdb_vx_vector_slice_to_dictionary(
+            cpp::duckdb_vx_vector_dictionary(
                 self.as_ptr(),
+                dict.as_ptr(),
+                dictionary_size as _,
                 sel_vec.as_ptr(),
-                sel_vec_length as _,
+                count as _,
             )
         }
     }
@@ -68,7 +88,7 @@ impl Vector {
         unsafe { cpp::duckdb_vx_set_dictionary_vector_length(self.as_ptr(), len) }
     }
 
-    // A pipeline-scoped id to assert dictionary vector value uniqueness
+    // A operator-scoped id to assert dictionary vector value uniqueness
     pub fn set_dictionary_id(&mut self, dict_id: String) {
         let dict_id = CString::new(dict_id)
             .map_err(|e| vortex_err!("cstr creation error {e}"))
@@ -121,9 +141,19 @@ impl Vector {
         !is_valid
     }
 
-    pub fn add_string_buffer<T>(&self, buffer: T) {
-        let data = Data::from(Box::new(buffer));
-        unsafe { cpp::duckdb_vx_string_vector_add_buffer(self.as_ptr(), data.into_ptr()) }
+    pub unsafe fn set_vector_buffer(&self, buffer: &VectorBuffer) {
+        unsafe { cpp::duckdb_vx_vector_set_vector_data_buffer(self.as_ptr(), buffer.as_ptr()) }
+    }
+
+    pub fn add_string_vector_buffer(&self, buffer: &VectorBuffer) {
+        unsafe {
+            cpp::duckdb_vx_string_vector_add_vector_data_buffer(self.as_ptr(), buffer.as_ptr())
+        }
+    }
+
+    /// Sets the data pointer for the vector. This is the start of the values array in the vector.
+    pub unsafe fn set_data_ptr<T>(&self, ptr: *mut T) {
+        unsafe { cpp::duckdb_vx_vector_set_data_ptr(self.as_ptr(), ptr as *mut c_void) }
     }
 
     /// Assigns the element at the specified index with a string value.
@@ -142,7 +172,17 @@ impl Vector {
     /// # SAFETY
     ///
     /// The provided capacity *must* be the actual capacity of this vector.
-    pub unsafe fn ensure_validity_slice(&mut self, capacity: usize) -> &mut BitSlice<u64> {
+    pub unsafe fn ensure_validity_bitslice(&mut self, capacity: usize) -> &mut BitSlice<u64> {
+        unsafe { self.ensure_validity_slice(capacity) }.view_bits_mut()
+    }
+
+    #[allow(clippy::expect_used)]
+    /// Ensure the validity slice is writable.
+    ///
+    /// # SAFETY
+    ///
+    /// The provided capacity *must* be the actual capacity of this vector.
+    pub unsafe fn ensure_validity_slice(&mut self, capacity: usize) -> &mut [u64] {
         unsafe {
             cpp::duckdb_vector_ensure_validity_writable(self.as_ptr());
             self.validity_slice_mut(capacity)
@@ -155,13 +195,21 @@ impl Vector {
     /// # SAFETY
     ///
     /// The provided capacity *must* be the actual capacity of this vector.
-    pub unsafe fn validity_slice_mut(&mut self, capacity: usize) -> Option<&mut BitSlice<u64>> {
+    pub unsafe fn validity_slice_mut(&mut self, capacity: usize) -> Option<&mut [u64]> {
         let ptr = unsafe { cpp::duckdb_vector_get_validity(self.as_ptr()) };
         unsafe { ptr.as_mut() }.map(|ptr| {
             let len = capacity.div_ceil(64);
-            let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
-            BitSlice::from_slice_mut(slice)
+            unsafe { std::slice::from_raw_parts_mut(ptr, len) }
         })
+    }
+
+    /// Returns the validity slice of the vector, if it exists.
+    ///
+    /// # SAFETY
+    ///
+    /// The provided capacity *must* be the actual capacity of this vector.
+    pub unsafe fn validity_bitslice_mut(&mut self, capacity: usize) -> Option<&mut BitSlice<u64>> {
+        unsafe { self.validity_slice_mut(capacity) }.map(|slice| slice.view_bits_mut())
     }
 
     pub fn validity_ref(&self, len: usize) -> ValidityRef<'_> {
@@ -209,11 +257,30 @@ impl Vector {
         unsafe { Self::borrow(cpp::duckdb_list_vector_get_child(self.as_ptr())) }
     }
 
+    pub fn array_vector_get_child(&self) -> Self {
+        // SAFETY: duckdb_array_vector_get_child dereferences the vector pointer which must be
+        // valid and point to an ARRAY type vector. The returned child vector is borrowed and
+        // remains valid as long as the parent vector is valid.
+        unsafe { Self::borrow(cpp::duckdb_array_vector_get_child(self.as_ptr())) }
+    }
+
     pub fn list_vector_set_size(&self, size: u64) -> VortexResult<()> {
         let state = unsafe { cpp::duckdb_list_vector_set_size(self.as_ptr(), size) };
         match state {
             cpp::duckdb_state::DuckDBSuccess => Ok(()),
             cpp::duckdb_state::DuckDBError => vortex_bail!("vector was nullptr!"),
+        }
+    }
+
+    pub fn struct_vector_get_child(&self, idx: usize) -> Self {
+        // SAFETY: duckdb_struct_vector_get_child dereferences the vector pointer which must be
+        // valid and point to an STRUCT type vector. The returned child vector is borrowed and
+        // remains valid as long as the parent vector is valid.
+        unsafe {
+            Self::borrow(cpp::duckdb_struct_vector_get_child(
+                self.as_ptr(),
+                idx as idx_t,
+            ))
         }
     }
 }
@@ -278,7 +345,7 @@ mod tests {
 
         // Set some positions as null
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
         validity_slice.set(1, false); // null at position 1
         validity_slice.set(3, false); // null at position 3
         validity_slice.set(7, false); // null at position 7
@@ -314,7 +381,7 @@ mod tests {
         let mut vector = Vector::with_capacity(logical_type, len);
 
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
         validity_slice.set(0, false); // null at position 0
 
         let validity = vector.validity_ref(len);
@@ -335,7 +402,7 @@ mod tests {
 
         // Ensure validity slice exists but don't set any nulls
         // SAFETY: Vector was created with this length.
-        let _validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let _validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
 
         let validity = vector.validity_ref(len);
         let null_buffer = validity.to_null_buffer();
@@ -367,7 +434,7 @@ mod tests {
         let mut vector = Vector::with_capacity(logical_type, len);
 
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
         // Set all positions as null
         for i in 0..len {
             validity_slice.set(i, false);
@@ -410,7 +477,7 @@ mod tests {
 
         // Set some positions as null
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
         validity_slice.set(1, false); // null at position 1
         validity_slice.set(3, false); // null at position 3
         validity_slice.set(7, false); // null at position 7
@@ -438,7 +505,7 @@ mod tests {
         let mut vector = Vector::with_capacity(logical_type, len);
 
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
         // Set all positions as null
         for i in 0..len {
             validity_slice.set(i, false);
@@ -460,7 +527,7 @@ mod tests {
         let mut vector = Vector::with_capacity(logical_type, len);
 
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
         validity_slice.set(0, false); // null at position 0
 
         let validity = vector.validity_ref(len);
@@ -477,7 +544,7 @@ mod tests {
 
         // Ensure validity slice exists but element is valid
         // SAFETY: Vector was created with this length.
-        let _validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let _validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
 
         let validity = vector.validity_ref(len);
 
@@ -492,7 +559,7 @@ mod tests {
         let mut vector = Vector::with_capacity(logical_type, len);
 
         // SAFETY: Vector was created with this length.
-        let validity_slice = unsafe { vector.ensure_validity_slice(len) };
+        let validity_slice = unsafe { vector.ensure_validity_bitslice(len) };
 
         // Set specific positions as null to test bit manipulation
         validity_slice.set(0, false); // First bit of first u64
@@ -515,5 +582,28 @@ mod tests {
         assert!(validity.is_valid(32), "Row 32 should be valid");
         assert!(validity.is_valid(62), "Row 62 should be valid");
         assert!(validity.is_valid(65), "Row 65 should be valid");
+    }
+
+    #[test]
+    fn test_dictionary() {
+        let logical_type = LogicalType::new(DUCKDB_TYPE::DUCKDB_TYPE_INTEGER);
+
+        let mut dict = Vector::with_capacity(logical_type.clone(), 2);
+        let dict_slice = unsafe { dict.as_slice_mut::<i32>(2) };
+        dict_slice[0] = 100;
+        dict_slice[1] = 200;
+
+        let vector = Vector::with_capacity(logical_type, 3);
+
+        let mut sel_vec = SelectionVector::with_capacity(3);
+        let sel_slice = unsafe { sel_vec.as_slice_mut(3) };
+        sel_slice[0] = 0;
+        sel_slice[1] = 1;
+        sel_slice[2] = 0;
+
+        vector.dictionary(&dict, 2, &sel_vec, 3);
+        vector.flatten(3);
+
+        assert_eq!(vector.as_slice_with_len::<i32>(3), &[100, 200, 100]);
     }
 }

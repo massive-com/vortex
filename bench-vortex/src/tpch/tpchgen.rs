@@ -171,7 +171,7 @@ fn generate_table_files(
         Format::Parquet | Format::Arrow | Format::OnDiskDuckDB => Format::Parquet,
         Format::OnDiskVortex => Format::OnDiskVortex,
         Format::VortexCompact => Format::VortexCompact,
-        f @ Format::Csv => {
+        f @ Format::Csv | f @ Format::Lance => {
             anyhow::bail!("{f} format is not supported by tpchgen");
         }
     };
@@ -381,10 +381,10 @@ impl VortexWriter {
         let write_task = Some(tokio::spawn(async move {
             let stream = ArrayStreamAdapter::new(dtype, ReceiverStream::new(receiver));
 
-            let file = TokioFile::create(&file_path).await?;
+            let mut file = TokioFile::create(&file_path).await?;
             compaction_strategy
                 .apply_options(VortexWriteOptions::default())
-                .write(file, stream)
+                .write(&mut file, stream)
                 .await
                 .map_err(|e| anyhow!("Vortex write failed: {}", e))?;
 

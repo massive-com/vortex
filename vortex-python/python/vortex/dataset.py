@@ -67,8 +67,8 @@ class VortexDataset(pyarrow.dataset.Dataset):
             raise ValueError("fragment_scan_options not supported")
         if use_threads:
             warnings.warn("Vortex does not support threading. Ignoring use_threads=True")
-        if cache_metadata:
-            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata=True")
+        if cache_metadata is not None:
+            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata setting.")
         del memory_pool
         return self._dataset.count_rows(
             row_filter=self._filter_expression(filter), split_by=batch_size, row_range=_row_range
@@ -94,6 +94,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
     @override
     def get_fragments(self, filter: pyarrow.dataset.Expression | Expr | None = None) -> Iterator[VortexFragment]:
         """A fragment for each file in the Dataset."""
+
         for left, right in self._dataset.splits():
             yield VortexFragment(self, (left, right))
 
@@ -108,7 +109,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = False,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
         _row_range: tuple[int, int] | None = None,
     ) -> pyarrow.Table:
@@ -121,7 +122,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         columns : list of str
             The columns to keep, identified by name.
         filter : :class:`.pyarrow.dataset.Expression`
-            Keep only rows for which this expression evalutes to ``True``. Any rows for which
+            Keep only rows for which this expression evaluates to ``True``. Any rows for which
             this expression evaluates to ``Null`` is removed.
         batch_size : int
             The maximum number of rows per batch.
@@ -153,8 +154,8 @@ class VortexDataset(pyarrow.dataset.Dataset):
             warnings.warn("Vortex does not support threading. Ignoring use_threads=True")
         if columns is not None and len(columns) == 0:
             raise ValueError("empty projections are not currently supported")
-        if cache_metadata:
-            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata=True")
+        if cache_metadata is not None:
+            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata setting.")
         del memory_pool
 
         return (
@@ -210,7 +211,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = False,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
         _row_range: tuple[int, int] | None = None,
     ) -> pyarrow.dataset.Scanner:
@@ -221,7 +222,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         columns : list of str
             The columns to keep, identified by name.
         filter : :class:`.pyarrow.dataset.Expression`
-            Keep only rows for which this expression evalutes to ``True``. Any rows for which
+            Keep only rows for which this expression evaluates to ``True``. Any rows for which
             this expression evaluates to ``Null`` is removed.
         batch_size : int
             The maximum number of rows per batch.
@@ -280,7 +281,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = False,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
         _row_range: tuple[int, int] | None = None,
     ) -> pyarrow.Table:
@@ -293,7 +294,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         columns : list of str
             The columns to keep, identified by name.
         filter : :class:`.pyarrow.dataset.Expression`
-            Keep only rows for which this expression evalutes to ``True``. Any rows for which
+            Keep only rows for which this expression evaluates to ``True``. Any rows for which
             this expression evaluates to ``Null`` is removed.
         batch_size : int
             The maximum number of rows per batch.
@@ -342,7 +343,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         columns : list of str
             The columns to keep, identified by name.
         filter : :class:`.pyarrow.dataset.Expression`
-            Keep only rows for which this expression evalutes to ``True``. Any rows for which
+            Keep only rows for which this expression evaluates to ``True``. Any rows for which
             this expression evaluates to ``Null`` is removed.
         batch_size : int
             The maximum number of rows per batch.
@@ -370,8 +371,8 @@ class VortexDataset(pyarrow.dataset.Dataset):
             raise ValueError("fragment_scan_options not supported")
         if use_threads:
             warnings.warn("Vortex does not support threading. Ignoring use_threads=True")
-        if cache_metadata:
-            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata=True")
+        if cache_metadata is not None:
+            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata setting.")
         if columns is not None and len(columns) == 0:
             raise ValueError("empty projections are not currently supported")
         del memory_pool
@@ -389,7 +390,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = False,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
         _row_range: tuple[int, int] | None = None,
     ) -> Iterator[pyarrow.RecordBatch]:
@@ -400,7 +401,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         columns : list of str
             The columns to keep, identified by name.
         filter : :class:`.pyarrow.dataset.Expression`
-            Keep only rows for which this expression evalutes to ``True``. Any rows for which
+            Keep only rows for which this expression evaluates to ``True``. Any rows for which
             this expression evaluates to ``Null`` is removed.
         batch_size : int
             The maximum number of rows per batch.
@@ -450,7 +451,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = True,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
         _row_range: tuple[int, int] | None = None,
     ) -> pyarrow.Table:
@@ -461,7 +462,7 @@ class VortexDataset(pyarrow.dataset.Dataset):
         columns : list of str, dict[str, :class:`.pyarrow.dataset.Expression`] | None
             The columns to keep, identified by name.
         filter : :class:`.pyarrow.dataset.Expression`
-            Keep only rows for which this expression evalutes to ``True``. Any rows for which
+            Keep only rows for which this expression evaluates to ``True``. Any rows for which
             this expression evaluates to ``Null`` is removed.
         batch_size : int
             The maximum number of rows per batch.
@@ -491,8 +492,8 @@ class VortexDataset(pyarrow.dataset.Dataset):
             raise ValueError("fragment_scan_options not supported")
         if use_threads:
             warnings.warn("Vortex does not support threading. Ignoring use_threads=True")
-        if cache_metadata:
-            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata=True")
+        if cache_metadata is not None:
+            warnings.warn("Vortex does not support cache_metadata. Ignoring cache_metadata setting.")
         if columns is not None and len(columns) == 0:
             raise ValueError("empty projections are not currently supported")
         del memory_pool
@@ -548,7 +549,7 @@ class VortexFragment(pyarrow.dataset.Fragment):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = True,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
     ) -> pyarrow.dataset.Scanner:
         """See :class:`vortex.dataset.VortexDataset.scanner`"""
@@ -608,7 +609,7 @@ class VortexFragment(pyarrow.dataset.Fragment):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = True,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
     ) -> pyarrow.Table:
         """See :class:`vortex.dataset.VortexDataset.to_table`"""
@@ -647,7 +648,7 @@ class VortexFragment(pyarrow.dataset.Fragment):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = True,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
     ) -> pyarrow.Table:
         """See :class:`vortex.dataset.VortexDataset.take`
@@ -683,7 +684,7 @@ class VortexFragment(pyarrow.dataset.Fragment):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = True,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
     ) -> pyarrow.Table:
         """See :class:`vortex.dataset.VortexDataset.head`"""
@@ -711,7 +712,7 @@ class VortexFragment(pyarrow.dataset.Fragment):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = True,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
     ) -> int:
         """See :class:`vortex.dataset.VortexDataset.count_rows`"""
@@ -739,7 +740,7 @@ class VortexScanner(pyarrow.dataset.Scanner):
     columns : list of str
         The columns to keep, identified by name.
     filter : :class:`.pyarrow.dataset.Expression`
-        Keep only rows for which this expression evalutes to ``True``. Any rows for which
+        Keep only rows for which this expression evaluates to ``True``. Any rows for which
         this expression evaluates to ``Null`` is removed.
     batch_size : int
         The maximum number of rows per batch.
@@ -770,7 +771,7 @@ class VortexScanner(pyarrow.dataset.Scanner):
         fragment_readahead: int | None = None,
         fragment_scan_options: pyarrow.dataset.FragmentScanOptions | None = None,
         use_threads: bool | None = None,
-        cache_metadata: bool = False,
+        cache_metadata: bool | None = None,
         memory_pool: pyarrow.MemoryPool | None = None,
         _row_range: tuple[int, int] | None = None,
     ):

@@ -32,6 +32,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
           targets: ${{ matrix.target.target }}
 
       - name: Cargo Set Version
@@ -40,7 +41,7 @@ jobs:
           cargo set-version --workspace ${{ github.event.release.tag_name || github.event.inputs.version }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         # Latest macOS doesn't allow maturin to install stuff into the global Python interpreter
         if: "${{ matrix.target.runs-on == 'macos-latest' }}"
         with:
@@ -80,6 +81,8 @@ jobs:
           distribution: "corretto"
           java-version: "17"
       - uses: ./.github/actions/setup-rust
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo build --release --package vortex-jni
       - uses: actions/upload-artifact@v4
         with:
@@ -120,6 +123,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target.target }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo build --release --package vortex-jni
       - uses: actions/upload-artifact@v4
         with:
@@ -144,6 +148,8 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/setup-rust
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cargo Set Version
         run: |
@@ -206,7 +212,7 @@ jobs:
         with:
           distribution: "corretto"
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - uses: actions/download-artifact@v5
         with:
           pattern: libvortex_jni_*.zip

@@ -9,8 +9,12 @@ use parking_lot::RwLock;
 use vortex_error::{VortexError, VortexResult, vortex_panic};
 use vortex_scalar::{Scalar, ScalarValue};
 
-use super::{Precision, Stat, StatsProvider, StatsSet, StatsSetIntoIter, TypedStatsSetRef};
+use super::{
+    MutTypedStatsSetRef, Precision, Stat, StatsProvider, StatsSet, StatsSetIntoIter,
+    TypedStatsSetRef,
+};
 use crate::Array;
+use crate::builders::builder_with_capacity;
 use crate::compute::{
     MinMaxResult, is_constant, is_sorted, is_strict_sorted, min_max, nan_count, sum,
 };
@@ -103,6 +107,15 @@ impl StatsSetRef<'_> {
         )
     }
 
+    pub fn with_mut_typed_stats_set<U, F: FnOnce(MutTypedStatsSetRef) -> U>(&self, apply: F) -> U {
+        apply(
+            self.array_stats
+                .inner
+                .write()
+                .as_mut_typed_ref(self.dyn_array_ref.dtype()),
+        )
+    }
+
     pub fn to_owned(&self) -> StatsSet {
         self.array_stats.inner.read().clone()
     }
@@ -145,10 +158,15 @@ impl StatsSetRef<'_> {
                     is_constant(self.dyn_array_ref)?.map(|v| v.into())
                 }
             }
-            Stat::IsSorted => Some(is_sorted(self.dyn_array_ref)?.into()),
-            Stat::IsStrictSorted => Some(is_strict_sorted(self.dyn_array_ref)?.into()),
+            Stat::IsSorted => is_sorted(self.dyn_array_ref)?.map(|v| v.into()),
+            Stat::IsStrictSorted => is_strict_sorted(self.dyn_array_ref)?.map(|v| v.into()),
             Stat::UncompressedSizeInBytes => {
-                let nbytes = self.dyn_array_ref.to_canonical().as_ref().nbytes();
+                let mut builder =
+                    builder_with_capacity(self.dyn_array_ref.dtype(), self.dyn_array_ref.len());
+                unsafe {
+                    builder.extend_from_array_unchecked(self.dyn_array_ref);
+                }
+                let nbytes = builder.finish().nbytes();
                 self.set(stat, Precision::exact(nbytes));
                 Some(nbytes.into())
             }
@@ -204,10 +222,6 @@ impl StatsSetRef<'_> {
 
     pub fn clear(&self, stat: Stat) {
         self.array_stats.clear(stat);
-    }
-
-    pub fn retain(&self, stats: &[Stat]) {
-        self.array_stats.retain(stats);
     }
 
     pub fn compute_min<U: for<'a> TryFrom<&'a Scalar, Error = VortexError>>(&self) -> Option<U> {

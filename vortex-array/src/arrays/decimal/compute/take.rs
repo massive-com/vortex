@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use num_traits::AsPrimitive;
 use vortex_buffer::Buffer;
-use vortex_dtype::{NativePType, match_each_integer_ptype};
+use vortex_dtype::{IntegerPType, match_each_integer_ptype};
 use vortex_error::VortexResult;
 use vortex_scalar::{NativeDecimalType, match_each_decimal_value_type};
 
@@ -23,7 +22,9 @@ impl TakeKernel for DecimalVTable {
             match_each_integer_ptype!(indices.ptype(), |I| {
                 let buffer =
                     take_to_buffer::<I, D>(indices.as_slice::<I>(), array.buffer::<D>().as_slice());
-                DecimalArray::new(buffer, array.decimal_dtype(), validity)
+                // SAFETY: Take operation preserves decimal dtype and creates valid buffer.
+                // Validity is computed correctly from the parent array and indices.
+                unsafe { DecimalArray::new_unchecked(buffer, array.decimal_dtype(), validity) }
             })
         });
 
@@ -34,10 +35,7 @@ impl TakeKernel for DecimalVTable {
 register_kernel!(TakeKernelAdapter(DecimalVTable).lift());
 
 #[inline]
-fn take_to_buffer<I: NativePType + AsPrimitive<usize>, T: NativeDecimalType>(
-    indices: &[I],
-    values: &[T],
-) -> Buffer<T> {
+fn take_to_buffer<I: IntegerPType, T: NativeDecimalType>(indices: &[I], values: &[T]) -> Buffer<T> {
     indices.iter().map(|idx| values[idx.as_()]).collect()
 }
 

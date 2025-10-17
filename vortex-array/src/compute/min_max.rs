@@ -22,6 +22,10 @@ static MIN_MAX_FN: LazyLock<ComputeFn> = LazyLock::new(|| {
     compute
 });
 
+pub(crate) fn warm_up_vtable() -> usize {
+    MIN_MAX_FN.kernels().len()
+}
+
 /// The minimum and maximum non-null values of an array, or None if there are no non-null values.
 ///
 /// The return value dtype is the non-nullable version of the array dtype.
@@ -232,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_bool_max() {
-        let p = BoolArray::new(
+        let p = BoolArray::from_bool_buffer(
             BooleanBuffer::from([true, true, true].as_slice()),
             Validity::NonNullable,
         );
@@ -244,7 +248,7 @@ mod tests {
             })
         );
 
-        let p = BoolArray::new(
+        let p = BoolArray::from_bool_buffer(
             BooleanBuffer::from([false, false, false].as_slice()),
             Validity::NonNullable,
         );
@@ -256,7 +260,7 @@ mod tests {
             })
         );
 
-        let p = BoolArray::new(
+        let p = BoolArray::from_bool_buffer(
             BooleanBuffer::from([false, true, false].as_slice()),
             Validity::NonNullable,
         );

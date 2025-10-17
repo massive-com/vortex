@@ -64,6 +64,13 @@ use crate::{Array, ArrayRef, IntoArray};
 /// execution than the core `StringArray` and `BinaryArray` types, at the expense of potentially
 /// needing [garbage collection][arrow_array::GenericByteViewArray::gc] to clear unreferenced items
 /// from memory.
+///
+/// # For Developers
+///
+/// If you add another variant to this enum, make sure to update [`Array::is_canonical`],
+/// [`ArrayRegistry::canonical_only`], and the fuzzer in `fuzz/fuzz_targets/array_ops.rs`.
+///
+/// [`ArrayRegistry::canonical_only`]: crate::ArrayRegistry::canonical_only
 #[derive(Debug, Clone)]
 pub enum Canonical {
     Null(NullArray),
@@ -71,7 +78,7 @@ pub enum Canonical {
     Primitive(PrimitiveArray),
     Decimal(DecimalArray),
     VarBinView(VarBinViewArray),
-    // TODO(joe): maybe this should be a ListView, however this will be annoying in spiral
+    // TODO(connor)[ListView]: Convert the canonical encoding of `List` to `ListViewArray`.
     List(ListArray),
     FixedSizeList(FixedSizeListArray),
     Struct(StructArray),
@@ -96,7 +103,7 @@ impl Canonical {
     pub fn compact(&self) -> VortexResult<Canonical> {
         match self {
             Canonical::VarBinView(array) => Ok(Canonical::VarBinView(array.compact_buffers()?)),
-            Canonical::List(array) => Ok(Canonical::List(array.reset_offsets()?)),
+            Canonical::List(array) => Ok(Canonical::List(array.reset_offsets(true)?)),
             _ => Ok(self.clone()),
         }
     }
@@ -104,11 +111,27 @@ impl Canonical {
 
 // Unwrap canonical type back down to specialized type.
 impl Canonical {
+    pub fn as_null(&self) -> &NullArray {
+        if let Canonical::Null(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get NullArray from {:?}", &self)
+        }
+    }
+
     pub fn into_null(self) -> NullArray {
         if let Canonical::Null(a) = self {
             a
         } else {
             vortex_panic!("Cannot unwrap NullArray from {:?}", &self)
+        }
+    }
+
+    pub fn as_bool(&self) -> &BoolArray {
+        if let Canonical::Bool(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get BoolArray from {:?}", &self)
         }
     }
 
@@ -120,11 +143,27 @@ impl Canonical {
         }
     }
 
+    pub fn as_primitive(&self) -> &PrimitiveArray {
+        if let Canonical::Primitive(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get PrimitiveArray from {:?}", &self)
+        }
+    }
+
     pub fn into_primitive(self) -> PrimitiveArray {
         if let Canonical::Primitive(a) = self {
             a
         } else {
             vortex_panic!("Cannot unwrap PrimitiveArray from {:?}", &self)
+        }
+    }
+
+    pub fn as_decimal(&self) -> &DecimalArray {
+        if let Canonical::Decimal(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get DecimalArray from {:?}", &self)
         }
     }
 
@@ -136,11 +175,27 @@ impl Canonical {
         }
     }
 
+    pub fn as_varbinview(&self) -> &VarBinViewArray {
+        if let Canonical::VarBinView(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get VarBinViewArray from {:?}", &self)
+        }
+    }
+
     pub fn into_varbinview(self) -> VarBinViewArray {
         if let Canonical::VarBinView(a) = self {
             a
         } else {
             vortex_panic!("Cannot unwrap VarBinViewArray from {:?}", &self)
+        }
+    }
+
+    pub fn as_list(&self) -> &ListArray {
+        if let Canonical::List(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get ListArray from {:?}", &self)
         }
     }
 
@@ -152,6 +207,14 @@ impl Canonical {
         }
     }
 
+    pub fn as_fixed_size_list(&self) -> &FixedSizeListArray {
+        if let Canonical::FixedSizeList(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get FixedSizeListArray from {:?}", &self)
+        }
+    }
+
     pub fn into_fixed_size_list(self) -> FixedSizeListArray {
         if let Canonical::FixedSizeList(a) = self {
             a
@@ -160,11 +223,27 @@ impl Canonical {
         }
     }
 
+    pub fn as_struct(&self) -> &StructArray {
+        if let Canonical::Struct(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get StructArray from {:?}", &self)
+        }
+    }
+
     pub fn into_struct(self) -> StructArray {
         if let Canonical::Struct(a) = self {
             a
         } else {
             vortex_panic!("Cannot unwrap StructArray from {:?}", &self)
+        }
+    }
+
+    pub fn as_extension(&self) -> &ExtensionArray {
+        if let Canonical::Extension(a) = self {
+            a
+        } else {
+            vortex_panic!("Cannot get ExtensionArray from {:?}", &self)
         }
     }
 
@@ -375,7 +454,7 @@ mod test {
 
         assert_eq!(
             inner_a.cloned().unwrap(),
-            ArrowPrimitiveArray::from_iter([100i64]),
+            ArrowPrimitiveArray::from_iter([100i64])
         );
     }
 

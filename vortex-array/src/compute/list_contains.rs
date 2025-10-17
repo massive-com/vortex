@@ -8,9 +8,8 @@ use std::sync::LazyLock;
 use arcref::ArcRef;
 use arrow_buffer::BooleanBuffer;
 use arrow_buffer::bit_iterator::BitIndexIterator;
-use num_traits::AsPrimitive;
 use vortex_buffer::Buffer;
-use vortex_dtype::{DType, NativePType, Nullability, match_each_integer_ptype};
+use vortex_dtype::{DType, IntegerPType, Nullability, match_each_integer_ptype};
 use vortex_error::{VortexExpect, VortexResult, vortex_bail};
 use vortex_scalar::{ListScalar, Scalar};
 
@@ -30,6 +29,10 @@ static LIST_CONTAINS_FN: LazyLock<ComputeFn> = LazyLock::new(|| {
     }
     compute
 });
+
+pub(crate) fn warm_up_vtable() -> usize {
+    LIST_CONTAINS_FN.kernels().len()
+}
 
 /// Compute a `Bool`-typed array the same length as `array` where elements is `true` if the list
 /// item contains the `value`, `false` otherwise.
@@ -300,7 +303,10 @@ fn list_false_or_null(list_array: &ListArray, nullability: Nullability) -> Vorte
         Validity::Array(validity_array) => {
             // Create a new bool array with false, and the provided nulls
             let buffer = BooleanBuffer::new_unset(list_array.len());
-            Ok(BoolArray::new(buffer, Validity::Array(validity_array.clone())).into_array())
+            Ok(
+                BoolArray::from_bool_buffer(buffer, Validity::Array(validity_array.clone()))
+                    .into_array(),
+            )
         }
     }
 }
@@ -323,7 +329,7 @@ fn list_is_not_empty(list_array: &ListArray, nullability: Nullability) -> Vortex
     });
 
     // Copy over the validity mask from the input.
-    Ok(BoolArray::new(
+    Ok(BoolArray::from_bool_buffer(
         buffer,
         list_array.validity().clone().union_nullability(nullability),
     )
@@ -332,7 +338,7 @@ fn list_is_not_empty(list_array: &ListArray, nullability: Nullability) -> Vortex
 
 /// Reduces each boolean values into a Mask that indicates which elements in the
 /// ListArray contain the matching value.
-fn reduce_with_ends<T: NativePType + AsPrimitive<usize>>(
+fn reduce_with_ends<T: IntegerPType>(
     ends: &[T],
     matches: &BooleanBuffer,
     validity: Validity,
@@ -346,7 +352,7 @@ fn reduce_with_ends<T: NativePType + AsPrimitive<usize>>(
         })
         .collect();
 
-    BoolArray::new(mask, validity).into_array()
+    BoolArray::from_bool_buffer(mask, validity).into_array()
 }
 
 /// Returns a new array of `u64` representing the length of each list element.
@@ -391,14 +397,14 @@ pub fn list_elem_len(array: &dyn Array) -> VortexResult<ArrayRef> {
     Ok(lens_array)
 }
 
-fn element_lens<T: NativePType>(values: &[T]) -> Buffer<T> {
+fn element_lens<T: IntegerPType>(values: &[T]) -> Buffer<T> {
     values
         .windows(2)
         .map(|window| window[1] - window[0])
         .collect()
 }
 
-fn element_is_not_empty<T: NativePType>(values: &[T]) -> BooleanBuffer {
+fn element_is_not_empty<T: IntegerPType>(values: &[T]) -> BooleanBuffer {
     BooleanBuffer::from_iter(values.windows(2).map(|window| window[1] != window[0]))
 }
 
@@ -447,7 +453,7 @@ mod tests {
     }
 
     fn bool_array(values: Vec<bool>, validity: Validity) -> BoolArray {
-        BoolArray::new(values.into_iter().collect(), validity)
+        BoolArray::from_bool_buffer(values.into_iter().collect(), validity)
     }
 
     #[rstest]

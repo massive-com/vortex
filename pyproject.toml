@@ -13,12 +13,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["dummy"] # Required for workspace project
 
-[tool.uv]
-managed = true
-required-version = ">=0.8.0"
+[dependency-groups]
 # Currently, all dev dependencies live in the root since uv doesn't have transitive dev dependencies.
 #  See: https://github.com/astral-sh/uv/issues/7541
-dev-dependencies = [
+dev = [
     "basedpyright>=1.31",
     "duckdb>=1.1.2",
     "ipython>=8.26.0",
@@ -36,6 +34,11 @@ dev-dependencies = [
     "pytest-benchmark>=5.1.0",
 ]
 
+[tool.uv]
+managed = true
+required-version = ">=0.8.0"
+
+
 [tool.uv.workspace]
 members = ["vortex-python", "docs"]
 
@@ -51,6 +54,9 @@ extend-exclude = [".venv", "vortex-duckdb/duckdb/**"]
 select = ["F", "E", "W", "UP", "I"]
 # Do not auto-fix unused variables. This is really annoying when IntelliJ runs autofix while editing.
 unfixable = ["F841"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["vortex.scan", "vortex.file", "vortex.expr", "vortex.ray", "vortex.type_aliases", "vortex.polars_"]
 
 [tool.pytest.ini_options]
 log_cli = true

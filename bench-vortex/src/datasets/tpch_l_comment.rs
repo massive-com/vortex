@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use anyhow::Result;
 use async_trait::async_trait;
+use futures::TryStreamExt;
 use glob::glob;
 use vortex::arrays::ChunkedArray;
 use vortex::dtype::Nullability::NonNullable;
@@ -21,7 +23,7 @@ impl Dataset for TPCHLCommentChunked {
         "TPC-H l_comment chunked"
     }
 
-    async fn to_vortex_array(&self) -> ArrayRef {
+    async fn to_vortex_array(&self) -> Result<ArrayRef> {
         let base_path = "tpch".to_data_path();
         let scale_factor_dir = base_path.join("1.0");
         let data_dir = scale_factor_dir.join(Format::OnDiskVortex.name());
@@ -32,8 +34,7 @@ impl Dataset for TPCHLCommentChunked {
             let options = TpchGenOptions::new("1.0".to_string(), scale_factor_dir)
                 .with_format(Format::OnDiskVortex);
 
-            futures::executor::block_on(generate_tpch_tables(options))
-                .expect("Failed to generate TPC-H data");
+            futures::executor::block_on(generate_tpch_tables(options))?;
         }
 
         let mut chunks: Vec<ArrayRef> = vec![];
@@ -42,25 +43,19 @@ impl Dataset for TPCHLCommentChunked {
                 .join("lineitem_*.vortex")
                 .to_string_lossy()
                 .as_ref(),
-        )
-        .unwrap()
-        {
-            let file = VortexOpenOptions::file()
-                .open(path.unwrap())
-                .await
-                .expect("cannot open lineitem.vortex");
-
-            chunks.extend(
-                file.scan()
-                    .expect("cannot scan lineitem.vortex")
-                    .with_projection(pack(vec![("l_comment", col("l_comment"))], NonNullable))
-                    .into_array_iter()
-                    .unwrap()
-                    .map(|a| a.unwrap().to_canonical().into_array()),
-            )
+        )? {
+            let file = VortexOpenOptions::new().open(path?).await?;
+            let file_chunks: Vec<_> = file
+                .scan()?
+                .with_projection(pack(vec![("l_comment", col("l_comment"))], NonNullable))
+                .map(|a| Ok(a.to_canonical().into_array()))
+                .into_array_stream()?
+                .try_collect()
+                .await?;
+            chunks.extend(file_chunks);
         }
 
-        ChunkedArray::from_iter(chunks).into_array()
+        Ok(ChunkedArray::from_iter(chunks).into_array())
     }
 }
 
@@ -72,12 +67,12 @@ impl Dataset for TPCHLCommentCanonical {
         "TPC-H l_comment canonical"
     }
 
-    async fn to_vortex_array(&self) -> ArrayRef {
+    async fn to_vortex_array(&self) -> Result<ArrayRef> {
         let comments_canonical = TPCHLCommentChunked
             .to_vortex_array()
-            .await
+            .await?
             .to_struct()
             .into_array();
-        ChunkedArray::from_iter([comments_canonical]).into_array()
+        Ok(ChunkedArray::from_iter([comments_canonical]).into_array())
     }
 }

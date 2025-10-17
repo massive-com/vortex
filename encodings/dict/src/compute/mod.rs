@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-mod binary_numeric;
 mod cast;
 mod compare;
 mod fill_null;
@@ -11,7 +10,7 @@ mod like;
 mod min_max;
 
 use vortex_array::compute::{
-    FilterKernel, FilterKernelAdapter, TakeKernel, TakeKernelAdapter, cast, filter, take,
+    FilterKernel, FilterKernelAdapter, TakeKernel, TakeKernelAdapter, filter, take,
 };
 use vortex_array::{Array, ArrayRef, IntoArray, register_kernel};
 use vortex_error::VortexResult;
@@ -21,16 +20,9 @@ use crate::{DictArray, DictVTable};
 
 impl TakeKernel for DictVTable {
     fn take(&self, array: &DictArray, indices: &dyn Array) -> VortexResult<ArrayRef> {
-        // TODO(joe): can we remove the cast and allow dict arrays to have nullable codes and values
         let codes = take(array.codes(), indices)?;
-        let values_dtype = array
-            .values()
-            .dtype()
-            .union_nullability(codes.dtype().nullability());
         // SAFETY: selecting codes doesn't change the invariants of DictArray
-        unsafe {
-            Ok(DictArray::new_unchecked(codes, cast(array.values(), &values_dtype)?).into_array())
-        }
+        Ok(unsafe { DictArray::new_unchecked(codes, array.values().clone()) }.into_array())
     }
 }
 
@@ -56,6 +48,7 @@ mod test {
     use vortex_array::compute::conformance::take::test_take_conformance;
     use vortex_array::compute::{Operator, compare, take};
     use vortex_array::{Array, ArrayRef, IntoArray, ToCanonical};
+    use vortex_buffer::buffer;
     use vortex_dtype::PType::I32;
     use vortex_dtype::{DType, Nullability};
     use vortex_scalar::Scalar;
@@ -78,10 +71,10 @@ mod test {
 
         let expected: Vec<i32> = (0..65)
             .map(|i| match i % 3 {
-                // Compressor puts 0 as a code for invalid values which we end up using in take
-                // thus invalid values on decompression turn into whatever is at 0th position in dictionary
-                0 | 2 => 42,
+                // Compressor puts 0 as a code for invalid values
+                0 => 42,
                 1 => -9,
+                2 => 0,
                 _ => unreachable!(),
             })
             .collect();
@@ -173,7 +166,7 @@ mod test {
 
     #[test]
     fn test_mask_dict_array() {
-        let array = dict_encode(&PrimitiveArray::from_iter([2, 0, 2, 0, 10]).into_array()).unwrap();
+        let array = dict_encode(&buffer![2, 0, 2, 0, 10].into_array()).unwrap();
         test_mask_conformance(array.as_ref());
 
         let array = dict_encode(
@@ -201,7 +194,7 @@ mod test {
 
     #[test]
     fn test_filter_dict_array() {
-        let array = dict_encode(&PrimitiveArray::from_iter([2, 0, 2, 0, 10]).into_array()).unwrap();
+        let array = dict_encode(&buffer![2, 0, 2, 0, 10].into_array()).unwrap();
         test_filter_conformance(array.as_ref());
 
         let array = dict_encode(
@@ -229,7 +222,7 @@ mod test {
 
     #[test]
     fn test_take_dict() {
-        let array = dict_encode(PrimitiveArray::from_iter([1, 2]).as_ref()).unwrap();
+        let array = dict_encode(buffer![1, 2].into_array().as_ref()).unwrap();
 
         assert_eq!(
             take(
@@ -244,7 +237,7 @@ mod test {
 
     #[test]
     fn test_take_dict_conformance() {
-        let array = dict_encode(&PrimitiveArray::from_iter([2, 0, 2, 0, 10]).into_array()).unwrap();
+        let array = dict_encode(&buffer![2, 0, 2, 0, 10].into_array()).unwrap();
         test_take_conformance(array.as_ref());
 
         let array = dict_encode(
@@ -277,6 +270,7 @@ mod tests {
     use vortex_array::IntoArray;
     use vortex_array::arrays::{PrimitiveArray, VarBinArray};
     use vortex_array::compute::conformance::consistency::test_array_consistency;
+    use vortex_buffer::buffer;
     use vortex_dtype::{DType, Nullability};
 
     use crate::DictArray;
@@ -284,11 +278,15 @@ mod tests {
 
     #[rstest]
     // Primitive arrays
-    #[case::dict_i32(dict_encode(&PrimitiveArray::from_iter([1i32, 2, 3, 2, 1]).into_array()).unwrap())]
-    #[case::dict_nullable_i32(dict_encode(
+    #[case::dict_i32(dict_encode(&buffer![1i32, 2, 3, 2, 1].into_array()).unwrap())]
+    #[case::dict_nullable_codes(DictArray::try_new(
+        buffer![0u32, 1, 2, 2, 0].into_array(),
+        PrimitiveArray::from_option_iter([Some(10), Some(20), None]).into_array(),
+    ).unwrap())]
+    #[case::dict_nullable_values(dict_encode(
         PrimitiveArray::from_option_iter([Some(1i32), None, Some(2), Some(1), None]).as_ref()
     ).unwrap())]
-    #[case::dict_u64(dict_encode(&PrimitiveArray::from_iter([100u64, 200, 100, 300, 200]).into_array()).unwrap())]
+    #[case::dict_u64(dict_encode(&buffer![100u64, 200, 100, 300, 200].into_array()).unwrap())]
     // String arrays
     #[case::dict_str(dict_encode(
         &VarBinArray::from_iter(
@@ -303,10 +301,9 @@ mod tests {
         ).into_array()
     ).unwrap())]
     // Edge cases
-    #[case::dict_single(dict_encode(&PrimitiveArray::from_iter([42i32]).into_array()).unwrap())]
-    #[case::dict_all_same(dict_encode(&PrimitiveArray::from_iter([5i32, 5, 5, 5, 5]).into_array()).unwrap())]
+    #[case::dict_single(dict_encode(&buffer![42i32].into_array()).unwrap())]
+    #[case::dict_all_same(dict_encode(&buffer![5i32, 5, 5, 5, 5].into_array()).unwrap())]
     #[case::dict_large(dict_encode(&PrimitiveArray::from_iter((0..1000).map(|i| i % 10)).into_array()).unwrap())]
-
     fn test_dict_consistency(#[case] array: DictArray) {
         test_array_consistency(array.as_ref());
     }

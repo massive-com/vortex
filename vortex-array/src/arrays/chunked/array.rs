@@ -7,49 +7,55 @@
 
 use std::fmt::Debug;
 
-use futures_util::stream;
+use futures::stream;
 use vortex_buffer::{Buffer, BufferMut};
 use vortex_dtype::DType;
 use vortex_error::{VortexExpect as _, VortexResult, VortexUnwrap, vortex_bail};
-use vortex_mask::Mask;
 
-use crate::arrays::ChunkedVTable;
 use crate::iter::{ArrayIterator, ArrayIteratorAdapter};
 use crate::search_sorted::{SearchSorted, SearchSortedSide};
-use crate::stats::{ArrayStats, StatsSetRef};
+use crate::stats::ArrayStats;
 use crate::stream::{ArrayStream, ArrayStreamAdapter};
-use crate::vtable::{ArrayVTable, ValidityVTable};
 use crate::{Array, ArrayRef, IntoArray};
 
 #[derive(Clone, Debug)]
 pub struct ChunkedArray {
-    dtype: DType,
-    len: usize,
-    chunk_offsets: Buffer<u64>,
-    chunks: Vec<ArrayRef>,
-    stats_set: ArrayStats,
+    pub(super) dtype: DType,
+    pub(super) len: usize,
+    pub(super) chunk_offsets: Buffer<u64>,
+    pub(super) chunks: Vec<ArrayRef>,
+    pub(super) stats_set: ArrayStats,
 }
 
 impl ChunkedArray {
+    /// Constructs a new `ChunkedArray`.
+    ///
+    /// See [`ChunkedArray::new_unchecked`] for more information.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provided components do not satisfy the invariants documented in
+    /// [`ChunkedArray::new_unchecked`].
     pub fn try_new(chunks: Vec<ArrayRef>, dtype: DType) -> VortexResult<Self> {
-        for chunk in &chunks {
-            if chunk.dtype() != &dtype {
-                vortex_bail!(MismatchedTypes: dtype, chunk.dtype());
-            }
-        }
+        Self::validate(&chunks, &dtype)?;
 
-        // SAFETY: validation done above
+        // SAFETY: validation done above.
         unsafe { Ok(Self::new_unchecked(chunks, dtype)) }
     }
 
-    /// Create a new `ChunkedArray` from a set of chunks without verifying that all chunks have
-    /// the same DType.
+    /// Creates a new [`ChunkedArray`] without validation from these components:
+    ///
+    /// * `chunks` is a vector of arrays to be concatenated logically.
+    /// * `dtype` is the common data type of all chunks.
     ///
     /// # Safety
     ///
-    /// The caller must ensure that all chunks have the same DType, else downstream operations
-    /// may break correctness assumptions about `ChunkedArray` child types.
+    /// All chunks must have exactly the same [`DType`] as the provided `dtype`.
     pub unsafe fn new_unchecked(chunks: Vec<ArrayRef>, dtype: DType) -> Self {
+        #[cfg(debug_assertions)]
+        Self::validate(&chunks, &dtype)
+            .vortex_expect("[Debug Assertion]: Invalid `ChunkedArray` parameters");
+
         let nchunks = chunks.len();
 
         let mut chunk_offsets = BufferMut::<u64>::with_capacity(nchunks + 1);
@@ -69,6 +75,19 @@ impl ChunkedArray {
             chunks,
             stats_set: Default::default(),
         }
+    }
+
+    /// Validates the components that would be used to create a [`ChunkedArray`].
+    ///
+    /// This function checks all the invariants required by [`ChunkedArray::new_unchecked`].
+    pub fn validate(chunks: &[ArrayRef], dtype: &DType) -> VortexResult<()> {
+        for chunk in chunks {
+            if chunk.dtype() != dtype {
+                vortex_bail!(MismatchedTypes: dtype, chunk.dtype());
+            }
+        }
+
+        Ok(())
     }
 
     #[inline]
@@ -138,7 +157,8 @@ impl ChunkedArray {
                 && !chunks_to_combine.is_empty()
             {
                 new_chunks.push(
-                    // SAFETY: combining chunks of same type maintains valid chunk types
+                    // SAFETY: chunks_to_combine contains valid chunks of the same dtype as self.
+                    // All chunks are guaranteed to be valid arrays matching self.dtype().
                     unsafe {
                         ChunkedArray::new_unchecked(chunks_to_combine, self.dtype().clone())
                             .to_canonical()
@@ -162,14 +182,16 @@ impl ChunkedArray {
 
         if !chunks_to_combine.is_empty() {
             new_chunks.push(unsafe {
-                // SAFETY: combining chunks of same type maintains valid chunk types
+                // SAFETY: chunks_to_combine contains valid chunks of the same dtype as self.
+                // All chunks are guaranteed to be valid arrays matching self.dtype().
                 ChunkedArray::new_unchecked(chunks_to_combine, self.dtype().clone())
                     .to_canonical()
                     .into_array()
             });
         }
 
-        // SAFETY: combining chunks of same type maintains valid chunk types
+        // SAFETY: new_chunks contains valid arrays of the same dtype as self.
+        // All chunks were either taken from self or created from self's chunks.
         unsafe { Ok(Self::new_unchecked(new_chunks, self.dtype().clone())) }
     }
 }
@@ -182,58 +204,6 @@ impl FromIterator<ArrayRef> for ChunkedArray {
             .map(|c| c.dtype().clone())
             .vortex_expect("Cannot infer DType from an empty iterator");
         Self::try_new(chunks, dtype).vortex_expect("Failed to create chunked array from iterator")
-    }
-}
-
-impl ArrayVTable<ChunkedVTable> for ChunkedVTable {
-    fn len(array: &ChunkedArray) -> usize {
-        array.len
-    }
-
-    fn dtype(array: &ChunkedArray) -> &DType {
-        &array.dtype
-    }
-
-    fn stats(array: &ChunkedArray) -> StatsSetRef<'_> {
-        array.stats_set.to_ref(array.as_ref())
-    }
-}
-
-impl ValidityVTable<ChunkedVTable> for ChunkedVTable {
-    fn is_valid(array: &ChunkedArray, index: usize) -> bool {
-        if !array.dtype.is_nullable() {
-            return true;
-        }
-        let (chunk, offset_in_chunk) = array.find_chunk_idx(index);
-        array.chunk(chunk).is_valid(offset_in_chunk)
-    }
-
-    fn all_valid(array: &ChunkedArray) -> bool {
-        if !array.dtype().is_nullable() {
-            return true;
-        }
-        for chunk in array.non_empty_chunks() {
-            if !chunk.all_valid() {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn all_invalid(array: &ChunkedArray) -> bool {
-        if !array.dtype().is_nullable() {
-            return false;
-        }
-        for chunk in array.non_empty_chunks() {
-            if !chunk.all_invalid() {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn validity_mask(array: &ChunkedArray) -> Mask {
-        array.chunks().iter().map(|a| a.validity_mask()).collect()
     }
 }
 

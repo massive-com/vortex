@@ -23,6 +23,10 @@ static NUMERIC_FN: LazyLock<ComputeFn> = LazyLock::new(|| {
     compute
 });
 
+pub(crate) fn warm_up_vtable() -> usize {
+    NUMERIC_FN.kernels().len()
+}
+
 /// Point-wise add two numeric arrays.
 ///
 /// Errs at runtime if the sum would overflow or underflow.
@@ -134,12 +138,13 @@ impl ComputeFnVTable for Numeric {
     ) -> VortexResult<Output> {
         let NumericArgs { lhs, rhs, operator } = NumericArgs::try_from(args)?;
 
-        // Check if LHS supports the operation directly.
         for kernel in kernels {
             if let Some(output) = kernel.invoke(args)? {
                 return Ok(output);
             }
         }
+
+        // Check if LHS supports the operation directly.
         if let Some(output) = lhs.invoke(&NUMERIC_FN, args)? {
             return Ok(output);
         }

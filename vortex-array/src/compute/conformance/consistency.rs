@@ -20,11 +20,12 @@
 //! - **Edge Cases**: Tests empty arrays, single elements, and boundary conditions.
 
 use arrow_buffer::BooleanBuffer;
+use vortex_buffer::buffer;
 use vortex_dtype::{DType, Nullability, PType};
 use vortex_error::{VortexUnwrap, vortex_panic};
 use vortex_mask::Mask;
 
-use crate::arrays::{BoolArray, PrimitiveArray};
+use crate::arrays::{BoolArray, ConstantArray, PrimitiveArray};
 use crate::compute::{Operator, and, cast, compare, filter, invert, mask, or, take};
 use crate::{Array, IntoArray};
 
@@ -274,7 +275,7 @@ fn test_slice_filter_consistency(array: &dyn Array) {
         filtered.len(),
         sliced.len(),
         "Filter with contiguous mask and slice should produce same length. \
-         Filtered length: {}, Sliced length: {}",
+         \nFiltered length: {}\nSliced length: {}",
         filtered.len(),
         sliced.len()
     );
@@ -285,7 +286,7 @@ fn test_slice_filter_consistency(array: &dyn Array) {
         assert_eq!(
             filtered_val, sliced_val,
             "Filter with contiguous mask and slice produced different values at index {i}. \
-             Filtered value: {filtered_val:?}, Sliced value: {sliced_val:?}"
+             \nFiltered value: {filtered_val:?}\nSliced value: {sliced_val:?}"
         );
     }
 }
@@ -321,7 +322,7 @@ fn test_take_slice_consistency(array: &dyn Array) {
         taken.len(),
         sliced.len(),
         "Take with sequential indices and slice should produce same length. \
-         Taken length: {}, Sliced length: {}",
+         \nTaken length: {}\nSliced length: {}",
         taken.len(),
         sliced.len()
     );
@@ -332,7 +333,7 @@ fn test_take_slice_consistency(array: &dyn Array) {
         assert_eq!(
             taken_val, sliced_val,
             "Take with sequential indices and slice produced different values at index {i}. \
-             Taken value: {taken_val:?}, Sliced value: {sliced_val:?}"
+             \nTaken value: {taken_val:?}\nSliced value: {sliced_val:?}"
         );
     }
 }
@@ -367,7 +368,7 @@ fn test_take_repeated_indices(array: &dyn Array) {
     }
 
     // Take the first element three times
-    let indices = PrimitiveArray::from_iter([0u64, 0, 0]).into_array();
+    let indices = buffer![0u64, 0, 0].into_array();
     let taken = take(array, &indices).vortex_unwrap();
 
     assert_eq!(taken.len(), 3);
@@ -572,7 +573,7 @@ fn test_comparison_inverse_consistency(array: &dyn Array) {
     };
 
     // Test Eq vs NotEq
-    let const_array = crate::arrays::ConstantArray::new(test_scalar, len);
+    let const_array = ConstantArray::new(test_scalar, len);
     if let (Ok(eq_result), Ok(neq_result)) = (
         compare(array, const_array.as_ref(), Operator::Eq),
         compare(array, const_array.as_ref(), Operator::NotEq),
@@ -668,7 +669,7 @@ fn test_comparison_symmetry_consistency(array: &dyn Array) {
     };
 
     // Create a constant array with the test scalar for reverse comparison
-    let const_array = crate::arrays::ConstantArray::new(test_scalar, len);
+    let const_array = ConstantArray::new(test_scalar, len);
 
     // Test Gt vs Lt symmetry
     if let (Ok(arr_gt_scalar), Ok(scalar_lt_arr)) = (

@@ -93,7 +93,7 @@ mod tests {
 
     use vortex_array::ToCanonical;
     use vortex_array::arrays::{PrimitiveArray, StructArray};
-    use vortex_array::iter::ArrayIteratorExt;
+    use vortex_array::stream::ArrayStreamExt;
     use vortex_dtype::Nullability;
     use vortex_expr::{get_item, root};
     use vortex_file::{VortexOpenOptions, VortexWriteOptions};
@@ -106,21 +106,22 @@ mod tests {
         let seq = SequenceArray::typed_new(2i8, 3, Nullability::NonNullable, 4).unwrap();
         let st = StructArray::from_fields(&[("a", seq.to_array())]).unwrap();
 
-        let file = tokio::fs::File::create("/tmp/abc.vx").await.unwrap();
+        let mut file = tokio::fs::File::create("/tmp/abc.vx").await.unwrap();
         VortexWriteOptions::default()
             .with_strategy(Arc::new(FlatLayoutStrategy::default()))
-            .write(file, st.to_array_stream())
+            .write(&mut file, st.to_array_stream())
             .await
             .unwrap();
 
-        let file = VortexOpenOptions::file().open("/tmp/abc.vx").await.unwrap();
+        let file = VortexOpenOptions::new().open("/tmp/abc.vx").await.unwrap();
         let array = file
             .scan()
             .unwrap()
             .with_projection(get_item("a", root()))
-            .into_array_iter()
+            .into_array_stream()
             .unwrap()
             .read_all()
+            .await
             .unwrap();
 
         let canon = PrimitiveArray::from_iter((0..4).map(|i| 2i8 + i * 3));

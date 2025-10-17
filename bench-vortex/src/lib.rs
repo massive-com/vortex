@@ -25,7 +25,9 @@ pub mod compress;
 pub mod conversions;
 pub mod datasets;
 pub mod display;
+pub mod downloadable_dataset;
 pub mod engines;
+pub mod fineweb;
 pub mod measurements;
 pub mod memory;
 pub mod metrics;
@@ -123,6 +125,9 @@ pub enum Format {
     #[clap(name = "duckdb")]
     #[serde(rename = "duckdb")]
     OnDiskDuckDB,
+    #[clap(name = "lance")]
+    #[serde(rename = "lance")]
+    Lance,
 }
 
 impl Display for Format {
@@ -140,6 +145,7 @@ impl Format {
             Format::OnDiskVortex => "vortex-file-compressed",
             Format::VortexCompact => "vortex-compact",
             Format::OnDiskDuckDB => "duckdb",
+            Format::Lance => "lance",
         }
     }
 
@@ -151,6 +157,7 @@ impl Format {
             Format::OnDiskVortex => "vortex",
             Format::VortexCompact => "vortex",
             Format::OnDiskDuckDB => "duckdb",
+            Format::Lance => "lance",
         }
     }
 }

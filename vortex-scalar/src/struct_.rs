@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -52,7 +53,12 @@ impl PartialEq for StructScalar<'_> {
         if !self.dtype.eq_ignore_nullability(other.dtype) {
             return false;
         }
-        self.fields() == other.fields()
+
+        match (self.fields(), other.fields()) {
+            (Some(lhs), Some(rhs)) => lhs.zip(rhs).all(|(l_s, r_s)| l_s == r_s),
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+        }
     }
 }
 
@@ -60,26 +66,48 @@ impl Eq for StructScalar<'_> {}
 
 /// Ord is not implemented since it's undefined for different field DTypes
 impl PartialOrd for StructScalar<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if !self.dtype.eq_ignore_nullability(other.dtype) {
             return None;
         }
-        self.fields().partial_cmp(&other.fields())
+
+        match (self.fields(), other.fields()) {
+            (Some(lhs), Some(rhs)) => {
+                for (l_s, r_s) in lhs.zip(rhs) {
+                    match l_s.partial_cmp(&r_s)? {
+                        Ordering::Equal => continue,
+                        Ordering::Less => return Some(Ordering::Less),
+                        Ordering::Greater => return Some(Ordering::Greater),
+                    }
+                }
+            }
+            (None, None) => return Some(Ordering::Equal),
+            (Some(_), None) => return Some(Ordering::Greater),
+            (None, Some(_)) => return Some(Ordering::Less),
+        }
+
+        Some(Ordering::Equal)
     }
 }
 
 impl Hash for StructScalar<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.dtype.hash(state);
-        self.fields().hash(state);
+        if let Some(fields) = self.fields() {
+            for f in fields {
+                f.hash(state);
+            }
+        }
     }
 }
 
 impl<'a> StructScalar<'a> {
+    #[inline]
     pub(crate) fn try_new(dtype: &'a DType, value: &'a ScalarValue) -> VortexResult<Self> {
         if !matches!(dtype, DType::Struct(..)) {
             vortex_bail!("Expected struct scalar, found {}", dtype)
         }
+
         Ok(Self {
             dtype,
             fields: value.as_list()?,
@@ -136,15 +164,13 @@ impl<'a> StructScalar<'a> {
     }
 
     /// Returns the fields of the struct scalar, or None if the scalar is null.
-    pub fn fields(&self) -> Option<Vec<Scalar>> {
+    pub fn fields(&self) -> Option<impl ExactSizeIterator<Item = Scalar>> {
         let fields = self.fields?;
         Some(
-            (0..fields.len())
-                .map(|index| {
-                    self.field_by_idx(index)
-                        .vortex_expect("never out of bounds")
-                })
-                .collect::<Vec<_>>(),
+            fields
+                .iter()
+                .zip(self.struct_fields().fields())
+                .map(|(v, dtype)| Scalar::new(dtype, v.clone())),
         )
     }
 
@@ -261,15 +287,12 @@ impl Scalar {
             }
         }
 
+        let mut value_children = Vec::with_capacity(children.len());
+        value_children.extend(children.into_iter().map(|x| x.into_value()));
+
         Self::new(
             dtype,
-            ScalarValue(InnerScalarValue::List(
-                children
-                    .into_iter()
-                    .map(|x| x.into_value())
-                    .collect_vec()
-                    .into(),
-            )),
+            ScalarValue(InnerScalarValue::List(value_children.into())),
         )
     }
 }
@@ -294,10 +317,7 @@ mod tests {
         let f1_dt = DType::Utf8(Nullability::NonNullable);
 
         let dtype = DType::Struct(
-            StructFields::new(
-                vec!["a".into(), "b".into()].into(),
-                vec![f0_dt.clone(), f1_dt.clone()],
-            ),
+            StructFields::new(["a", "b"].into(), vec![f0_dt.clone(), f1_dt.clone()]),
             Nullability::Nullable,
         );
 
@@ -404,7 +424,7 @@ mod tests {
 
         let scalar = Scalar::struct_(dtype, vec![f0_val, f1_val]);
 
-        let fields = scalar.as_struct().fields().unwrap();
+        let fields = scalar.as_struct().fields().unwrap().collect::<Vec<_>>();
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].as_primitive().typed_value::<i32>().unwrap(), 100);
         assert_eq!(fields[1].as_utf8().value().unwrap(), "test".into());
@@ -424,7 +444,7 @@ mod tests {
     fn test_struct_cast_to_struct() {
         // Create source struct
         let source_fields = StructFields::new(
-            vec!["x".into(), "y".into()].into(),
+            ["x", "y"].into(),
             vec![
                 DType::Primitive(I32, Nullability::NonNullable),
                 DType::Primitive(I32, Nullability::NonNullable),
@@ -434,7 +454,7 @@ mod tests {
 
         // Create target struct with different field types
         let target_fields = StructFields::new(
-            vec!["x".into(), "y".into()].into(),
+            ["x", "y"].into(),
             vec![
                 DType::Primitive(vortex_dtype::PType::I64, Nullability::NonNullable),
                 DType::Primitive(vortex_dtype::PType::I64, Nullability::NonNullable),
@@ -450,7 +470,7 @@ mod tests {
         let result = source_scalar.as_struct().cast(&target_dtype).unwrap();
         assert_eq!(result.dtype(), &target_dtype);
 
-        let fields = result.as_struct().fields().unwrap();
+        let fields = result.as_struct().fields().unwrap().collect::<Vec<_>>();
         assert_eq!(fields[0].as_primitive().typed_value::<i64>().unwrap(), 42);
         assert_eq!(fields[1].as_primitive().typed_value::<i64>().unwrap(), 123);
     }
@@ -458,13 +478,13 @@ mod tests {
     #[test]
     fn test_struct_cast_mismatched_fields() {
         let source_fields = StructFields::new(
-            vec!["a".into()].into(),
+            ["a"].into(),
             vec![DType::Primitive(I32, Nullability::NonNullable)],
         );
         let source_dtype = DType::Struct(source_fields, Nullability::NonNullable);
 
         let target_fields = StructFields::new(
-            vec!["a".into(), "b".into()].into(),
+            ["a", "b"].into(),
             vec![
                 DType::Primitive(I32, Nullability::NonNullable),
                 DType::Primitive(I32, Nullability::NonNullable),
@@ -513,7 +533,7 @@ mod tests {
         assert_eq!(projected_struct.names().len(), 1);
         assert_eq!(projected_struct.names()[0].as_ref(), "b");
 
-        let fields = projected_struct.fields().unwrap();
+        let fields = projected_struct.fields().unwrap().collect::<Vec<_>>();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].as_utf8().value().unwrap().as_str(), "hello");
     }
@@ -585,7 +605,7 @@ mod tests {
         // Different struct types cannot be compared
         let other_dtype = DType::Struct(
             StructFields::new(
-                vec!["c".into()].into(),
+                ["c"].into(),
                 vec![DType::Primitive(I32, Nullability::NonNullable)],
             ),
             Nullability::NonNullable,

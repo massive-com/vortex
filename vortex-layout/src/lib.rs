@@ -3,15 +3,12 @@
 
 mod registry;
 pub use registry::*;
-mod executor;
-pub use executor::*;
 pub mod layouts;
 
 pub use children::*;
 pub use encoding::*;
 pub use flatbuffers::*;
 pub use layout::*;
-pub use mask::*;
 pub use reader::*;
 pub use strategy::*;
 pub use vtable::*;
@@ -20,7 +17,6 @@ mod children;
 mod encoding;
 mod flatbuffers;
 mod layout;
-mod mask;
 mod reader;
 pub mod segments;
 pub mod sequence;

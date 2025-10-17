@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -9,12 +10,13 @@ use futures::{StreamExt as _, pin_mut};
 use vortex_array::arrays::ChunkedArray;
 use vortex_array::{Array, ArrayContext, ArrayRef, IntoArray};
 use vortex_error::{VortexExpect, VortexResult};
+use vortex_io::runtime::Handle;
 
-use crate::segments::SequenceWriter;
-use crate::{
-    LayoutRef, LayoutStrategy, SendableSequentialStream, SequentialStreamAdapter,
-    SequentialStreamExt,
+use crate::segments::SegmentSinkRef;
+use crate::sequence::{
+    SendableSequentialStream, SequencePointer, SequentialStreamAdapter, SequentialStreamExt,
 };
+use crate::{LayoutRef, LayoutStrategy};
 
 #[derive(Clone)]
 pub struct RepartitionWriterOptions {
@@ -22,6 +24,7 @@ pub struct RepartitionWriterOptions {
     pub block_size_minimum: u64,
     /// The multiple of the number of rows in each block.
     pub block_len_multiple: usize,
+    pub canonicalize: bool,
 }
 
 /// Repartition a stream of arrays into blocks.
@@ -29,48 +32,52 @@ pub struct RepartitionWriterOptions {
 /// Each emitted block (except the last) is at least `block_size_minimum` bytes and contains a
 /// multiple of `block_len_multiple` rows.
 #[derive(Clone)]
-pub struct RepartitionStrategy<S> {
-    child: S,
+pub struct RepartitionStrategy {
+    child: Arc<dyn LayoutStrategy>,
     options: RepartitionWriterOptions,
 }
 
-impl<S> RepartitionStrategy<S>
-where
-    S: LayoutStrategy,
-{
-    pub fn new(child: S, options: RepartitionWriterOptions) -> Self {
-        Self { child, options }
+impl RepartitionStrategy {
+    pub fn new<S: LayoutStrategy>(child: S, options: RepartitionWriterOptions) -> Self {
+        Self {
+            child: Arc::new(child),
+            options,
+        }
     }
 }
 
 #[async_trait]
-impl<S> LayoutStrategy for RepartitionStrategy<S>
-where
-    S: LayoutStrategy,
-{
+impl LayoutStrategy for RepartitionStrategy {
     async fn write_stream(
         &self,
-        ctx: &ArrayContext,
-        sequence_writer: SequenceWriter,
+        ctx: ArrayContext,
+        segment_sink: SegmentSinkRef,
         stream: SendableSequentialStream,
+        eof: SequencePointer,
+        handle: Handle,
     ) -> VortexResult<LayoutRef> {
         // TODO(os): spawn stream below like:
         // canon_stream = stream.map(async {to_canonical}).map(spawn).buffered(parallelism)
         let dtype = stream.dtype().clone();
-        let canonical_stream = SequentialStreamAdapter::new(
-            dtype.clone(),
-            stream.map(|chunk| {
-                let (sequence_id, chunk) = chunk?;
-                VortexResult::Ok((sequence_id, chunk.to_canonical().into_array()))
-            }),
-        )
-        .sendable();
+        let stream = if self.options.canonicalize {
+            SequentialStreamAdapter::new(
+                dtype.clone(),
+                stream.map(|chunk| {
+                    let (sequence_id, chunk) = chunk?;
+                    VortexResult::Ok((sequence_id, chunk.to_canonical().into_array()))
+                }),
+            )
+            .sendable()
+        } else {
+            stream
+        };
 
         let dtype_clone = dtype.clone();
         let options = self.options.clone();
         let repartitioned_stream = try_stream! {
-            let canonical_stream = canonical_stream.peekable();
+            let canonical_stream = stream.peekable();
             pin_mut!(canonical_stream);
+
             let mut chunks = ChunksBuffer::new(options.clone());
             while let Some(chunk) = canonical_stream.as_mut().next().await {
                 let (sequence_id, chunk) = chunk?;
@@ -113,10 +120,20 @@ where
         self.child
             .write_stream(
                 ctx,
-                sequence_writer,
+                segment_sink,
                 SequentialStreamAdapter::new(dtype, repartitioned_stream).sendable(),
+                eof,
+                handle,
             )
             .await
+    }
+
+    fn buffered_bytes(&self) -> u64 {
+        // TODO(os): we should probably add the buffered bytes from this strategy on top,
+        // it is currently better to not add it at all because these buffered arrays are
+        // potentially sliced and uncompressed. They would overestimate the actual bytes
+        // that will end up in the file when flushed.
+        self.child.buffered_bytes()
     }
 }
 

@@ -17,13 +17,14 @@ use vortex::error::{VortexError, VortexExpect, VortexResult, vortex_err};
 use vortex::expr::proto::deserialize_expr_proto;
 use vortex::expr::{root, select};
 use vortex::file::{VortexFile, VortexOpenOptions};
+use vortex::io::runtime::tokio::TokioRuntime;
 use vortex::proto::expr as pb;
 use vortex::utils::aliases::hash_map::HashMap;
 
 use crate::array_iter::NativeArrayIterator;
 use crate::errors::try_or_throw;
 use crate::object_store::make_object_store;
-use crate::{SESSION, block_on};
+use crate::{SESSION, TOKIO_RUNTIME, block_on};
 
 pub struct NativeFile {
     inner: VortexFile,
@@ -210,7 +211,8 @@ pub extern "system" fn Java_dev_vortex_jni_NativeFileMethods_open<'local>(
         let (store, _scheme) = make_object_store(&url, &properties)?;
         let open_file = block_on(
             "VortexOpenOptions.open()",
-            VortexOpenOptions::file()
+            VortexOpenOptions::new()
+                .with_handle(TokioRuntime::current())
                 .with_array_registry(Arc::new(SESSION.arrays().clone()))
                 .with_layout_registry(Arc::new(SESSION.layouts().clone()))
                 .open_object_store(&store, url.path()),
@@ -314,6 +316,9 @@ pub extern "system" fn Java_dev_vortex_jni_NativeFileMethods_scan(
             scan_builder = scan_builder.with_row_range(start_idx..end_idx);
         }
 
-        Ok(NativeArrayIterator::new(Box::new(scan_builder.into_array_iter()?)).into_raw())
+        Ok(NativeArrayIterator::new(Box::new(
+            scan_builder.into_array_iter(&TokioRuntime::from(TOKIO_RUNTIME.handle()))?,
+        ))
+        .into_raw())
     })
 }

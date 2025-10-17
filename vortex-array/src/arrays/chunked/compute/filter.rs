@@ -27,7 +27,8 @@ impl FilterKernel for ChunkedVTable {
             MaskIter::Slices(slices) => filter_slices(array, slices.iter().copied()),
         }?;
 
-        // SAFETY: filter on chunks with same DType will yield chunks with same DType
+        // SAFETY: Filter operation preserves the dtype of each chunk.
+        // All filtered chunks maintain the same dtype as the original array.
         unsafe { Ok(ChunkedArray::new_unchecked(chunks, array.dtype().clone()).into_array()) }
     }
 }
@@ -205,23 +206,23 @@ mod test {
     fn filter_chunked_floats() {
         let chunked = ChunkedArray::try_new(
             vec![
-                PrimitiveArray::from_iter([f16::from_f32(0.1463623)]).to_array(),
-                PrimitiveArray::from_iter([
+                buffer![f16::from_f32(0.1463623)].into_array(),
+                buffer![
                     f16::NAN,
                     f16::from_f32(0.24987793),
                     f16::from_f32(0.22497559),
                     f16::from_f32(0.22497559),
                     f16::from_f32(-36160.0),
-                ])
-                .to_array(),
-                PrimitiveArray::from_iter([
+                ]
+                .into_array(),
+                buffer![
                     f16::NAN,
                     f16::NAN,
                     f16::from_f32(0.22497559),
                     f16::from_f32(0.22497559),
                     f16::from_f32(3174.0),
-                ])
-                .to_array(),
+                ]
+                .into_array(),
             ],
             DType::Primitive(PType::F16, Nullability::NonNullable),
         )

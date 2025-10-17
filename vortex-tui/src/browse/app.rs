@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use futures_executor::block_on;
+use futures::executor::block_on;
 use ratatui::prelude::Size;
 use ratatui::widgets::ListState;
 use vortex::dtype::DType;
@@ -178,7 +178,7 @@ impl AppState<'_> {
 
 /// Create an app backed from a file path.
 pub async fn create_file_app<'a>(path: impl AsRef<Path>) -> VortexResult<AppState<'a>> {
-    let vxf = VortexOpenOptions::file().open(path).await?;
+    let vxf = VortexOpenOptions::new().open(path.as_ref()).await?;
 
     let cursor = LayoutCursor::new(vxf.footer().clone(), vxf.segment_source());
 

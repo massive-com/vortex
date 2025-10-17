@@ -5,14 +5,14 @@ use std::collections::BTreeSet;
 use std::ops::{BitAnd, Range};
 use std::sync::{Arc, OnceLock};
 
-use async_trait::async_trait;
-use futures::{FutureExt, join};
-use vortex_array::ArrayRef;
+use futures::future::BoxFuture;
+use futures::{FutureExt, TryFutureExt, try_join};
 use vortex_array::compute::{MinMaxResult, min_max, take};
 use vortex_array::stats::Precision;
+use vortex_array::{ArrayRef, MaskFuture};
 use vortex_dict::DictArray;
 use vortex_dtype::{DType, FieldMask};
-use vortex_error::{VortexExpect, VortexResult};
+use vortex_error::{VortexError, VortexExpect, VortexResult};
 use vortex_expr::{ExprRef, Scope, root};
 use vortex_mask::Mask;
 use vortex_utils::aliases::dash_map::DashMap;
@@ -20,10 +20,7 @@ use vortex_utils::aliases::dash_map::DashMap;
 use super::DictLayout;
 use crate::layouts::SharedArrayFuture;
 use crate::segments::SegmentSource;
-use crate::{
-    ArrayEvaluation, LayoutReader, LayoutReaderRef, MaskEvaluation, MaskFuture,
-    NoOpPruningEvaluation, PruningEvaluation,
-};
+use crate::{LayoutReader, LayoutReaderRef};
 
 pub struct DictReader {
     layout: DictLayout,
@@ -72,18 +69,16 @@ impl DictReader {
         let values_len = self.values_len;
         self.values_array
             .get_or_init(move || {
-                let eval = self
-                    .values
-                    .projection_evaluation(&(0..values_len as u64), &root())
-                    .vortex_expect("must construct dict values array evaluation");
-
-                async move {
-                    eval.invoke(MaskFuture::new_true(values_len))
-                        .await
-                        .map_err(Arc::new)
-                }
-                .boxed()
-                .shared()
+                self.values
+                    .projection_evaluation(
+                        &(0..values_len as u64),
+                        &root(),
+                        MaskFuture::new_true(values_len),
+                    )
+                    .vortex_expect("must construct dict values array evaluation")
+                    .map_err(Arc::new)
+                    .boxed()
+                    .shared()
             })
             .clone()
     }
@@ -127,29 +122,59 @@ impl LayoutReader for DictReader {
         &self,
         _row_range: &Range<u64>,
         _expr: &ExprRef,
-    ) -> VortexResult<Box<dyn PruningEvaluation>> {
+        mask: Mask,
+    ) -> VortexResult<MaskFuture> {
         // NOTE: we can get the values here, convert expression to the codes domain, and push down
         // to the codes child. We don't do that here because:
         // - Reading values only for an approx filter is expensive
         // - In practice, all stats based pruning evaluation should be already done upstream of this dict reader
-        Ok(Box::new(NoOpPruningEvaluation))
+        Ok(MaskFuture::ready(mask))
     }
 
     fn filter_evaluation(
         &self,
         row_range: &Range<u64>,
         expr: &ExprRef,
-    ) -> VortexResult<Box<dyn MaskEvaluation>> {
+        mask: MaskFuture,
+    ) -> VortexResult<MaskFuture> {
         let values_eval = self.values_eval(expr.clone());
 
         // We register interest on the entire codes row_range for now, there
         // is no straightforward shift into the codes domain we can do to the expression
         // without reading values.
-        let codes_eval = self.codes.projection_evaluation(row_range, &root())?;
+        let codes_eval = self.codes.projection_evaluation(
+            row_range,
+            &root(),
+            MaskFuture::new_true(mask.len()),
+        )?;
 
-        Ok(Box::new(DictMaskEvaluation {
-            values_eval,
-            codes_eval,
+        Ok(MaskFuture::new(mask.len(), async move {
+            // Join on the I/O futures first, before the mask.
+            let (codes, values) = try_join!(codes_eval, values_eval.map_err(VortexError::from))?;
+            let mask = mask.await?;
+
+            // Short-circuit when the values are all true/false.
+            if let Some(MinMaxResult { min, max }) = min_max(&values)? {
+                if !max.as_bool().value().unwrap_or(true) {
+                    // All values are false
+                    return Ok(Mask::AllFalse(mask.len()));
+                }
+                if min.as_bool().value().unwrap_or(false) {
+                    // All values are true, but we still need to respect codes validity
+                    return Ok(mask.bitand(&codes.validity_mask()));
+                }
+            }
+
+            // Creating a mask from the dict array would canonicalize it,
+            // it should be fine for now as long as values is already canonical,
+            // so different row ranges do not canonicalize to the same array
+            // multiple times.
+            // TODO(joe): fixme casting null to false is *VERY* unsound, if the expression in the filter
+            // can inspect nulls (e.g. `is_null`).
+            // See `FlatEvaluation` for more details.
+            let dict_mask = take(&values, &codes)?.try_to_mask_fill_null_false()?;
+
+            Ok(mask.bitand(&dict_mask))
         }))
     }
 
@@ -157,76 +182,20 @@ impl LayoutReader for DictReader {
         &self,
         row_range: &Range<u64>,
         expr: &ExprRef,
-    ) -> VortexResult<Box<dyn ArrayEvaluation>> {
+        mask: MaskFuture,
+    ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
         let values_eval = self.values_eval(root());
-        let codes_eval = self.codes.projection_evaluation(row_range, &root())?;
-        Ok(Box::new(DictArrayEvaluation {
-            values_eval,
-            codes_eval,
-            expr: expr.clone(),
-        }))
-    }
-}
+        let codes_eval = self.codes.projection_evaluation(row_range, &root(), mask)?;
+        let expr = expr.clone();
 
-struct DictMaskEvaluation {
-    values_eval: SharedArrayFuture,
-    codes_eval: Box<dyn ArrayEvaluation>,
-}
+        Ok(async move {
+            let (values, codes) = try_join!(values_eval.map_err(VortexError::from), codes_eval)?;
 
-#[async_trait]
-impl MaskEvaluation for DictMaskEvaluation {
-    async fn invoke(&self, mask: MaskFuture) -> VortexResult<Mask> {
-        let values = self.values_eval.clone().await?;
-        let mask = mask.await?;
-
-        // Short-circuit when the values are all true/false.
-        if let Some(MinMaxResult { min, max }) = min_max(&values)? {
-            if !max.as_bool().value().unwrap_or(true) {
-                // All values are false
-                return Ok(Mask::AllFalse(mask.len()));
-            }
-            if min.as_bool().value().unwrap_or(false) {
-                // All values are true, but we still need to respect codes validity
-                let codes = self
-                    .codes_eval
-                    .invoke(MaskFuture::new_true(mask.len()))
-                    .await?;
-                return Ok(mask.bitand(&codes.validity_mask()));
-            }
+            // Validate that codes are valid for the values
+            let array = DictArray::try_new(codes, values)?.to_array();
+            expr.evaluate(&Scope::new(array))
         }
-
-        let codes = self
-            .codes_eval
-            .invoke(MaskFuture::new_true(mask.len()))
-            .await?;
-        // Creating a mask from the dict array would canonicalize it,
-        // it should be fine for now as long as values is already canonical,
-        // so different row ranges do not canonicalize to the same array
-        // multiple times.
-        // TODO(joe): fixme casting null to false is *VERY* unsound, if the expression in the filter
-        // can inspect nulls (e.g. `is_null`).
-        // See `FlatEvaluation` for more details.
-        let dict_mask = take(&values, &codes)?.try_to_mask_fill_null_false()?;
-
-        Ok(mask.bitand(&dict_mask))
-    }
-}
-
-struct DictArrayEvaluation {
-    values_eval: SharedArrayFuture,
-    codes_eval: Box<dyn ArrayEvaluation>,
-    expr: ExprRef,
-}
-
-#[async_trait]
-impl ArrayEvaluation for DictArrayEvaluation {
-    async fn invoke(&self, mask: MaskFuture) -> VortexResult<ArrayRef> {
-        let (values_result, codes) = join!(self.values_eval.clone(), self.codes_eval.invoke(mask));
-        let (values_result, codes) = (values_result?, codes?);
-
-        // Validate that codes are valid for the values
-        let array = DictArray::try_new(codes, values_result)?.to_array();
-        self.expr.evaluate(&Scope::new(array))
+        .boxed())
     }
 }
 
@@ -234,106 +203,109 @@ impl ArrayEvaluation for DictArrayEvaluation {
 mod tests {
     use std::sync::Arc;
 
-    use futures::executor::block_on;
-    use futures::stream;
     use rstest::rstest;
     use vortex_array::arrays::{StructArray, VarBinArray};
     use vortex_array::arrow::IntoArrowArray;
     use vortex_array::validity::Validity;
-    use vortex_array::{ArrayContext, IntoArray as _};
+    use vortex_array::{ArrayContext, IntoArray as _, MaskFuture};
     use vortex_dtype::{DType, FieldName, FieldNames, Nullability};
     use vortex_expr::{is_null, not, pack, root};
+    use vortex_io::runtime::single::block_on;
 
     use crate::layouts::dict::writer::{DictLayoutOptions, DictStrategy};
     use crate::layouts::flat::writer::FlatLayoutStrategy;
-    use crate::segments::{SequenceWriter, TestSegments};
-    use crate::sequence::SequenceId;
-    use crate::{
-        LayoutId, LayoutRef, LayoutStrategy, LocalExecutor, MaskFuture, SequentialStreamAdapter,
-        SequentialStreamExt,
+    use crate::segments::TestSegments;
+    use crate::sequence::{
+        SequenceId, SequentialArrayStreamExt, SequentialStreamAdapter, SequentialStreamExt,
     };
+    use crate::{LayoutId, LayoutRef, LayoutStrategy};
 
-    #[tokio::test]
-    async fn reading_nested_packs_works() {
-        let strategy = DictStrategy::new(
-            FlatLayoutStrategy::default(),
-            FlatLayoutStrategy::default(),
-            FlatLayoutStrategy::default(),
-            DictLayoutOptions::default(),
-            Arc::new(LocalExecutor),
-        );
+    #[test]
+    fn reading_nested_packs_works() {
+        block_on(|handle| async move {
+            let strategy = DictStrategy::new(
+                FlatLayoutStrategy::default(),
+                FlatLayoutStrategy::default(),
+                FlatLayoutStrategy::default(),
+                DictLayoutOptions::default(),
+            );
 
-        let array = VarBinArray::from_iter(
-            [
-                Some("abc"),
-                Some("def"),
-                None,
-                Some("abc"),
-                Some("def"),
-                None,
-                Some("abc"),
-                Some("def"),
-                None,
-            ],
-            DType::Utf8(Nullability::Nullable),
-        )
-        .to_array();
-        let array_to_write = array.clone();
-        let ctx = ArrayContext::empty();
-        let segments = TestSegments::default();
-        let layout: LayoutRef = block_on(
-            strategy.write_stream(
-                &ctx,
-                SequenceWriter::new(Box::new(segments.clone())),
-                SequentialStreamAdapter::new(
-                    DType::Utf8(Nullability::Nullable),
-                    stream::once(
-                        async move { Ok((SequenceId::root().downgrade(), array_to_write)) },
-                    ),
+            let array = VarBinArray::from_iter(
+                [
+                    Some("abc"),
+                    Some("def"),
+                    None,
+                    Some("abc"),
+                    Some("def"),
+                    None,
+                    Some("abc"),
+                    Some("def"),
+                    None,
+                ],
+                DType::Utf8(Nullability::Nullable),
+            )
+            .to_array();
+            let array_to_write = array.clone();
+            let ctx = ArrayContext::empty();
+            let segments = Arc::new(TestSegments::default());
+            let (ptr, eof) = SequenceId::root().split();
+            let layout: LayoutRef = strategy
+                .write_stream(
+                    ctx,
+                    segments.clone(),
+                    SequentialStreamAdapter::new(
+                        DType::Utf8(Nullability::Nullable),
+                        array_to_write.to_array_stream().sequenced(ptr),
+                    )
+                    .sendable(),
+                    eof,
+                    handle,
                 )
-                .sendable(),
-            ),
-        )
-        .unwrap();
+                .await
+                .unwrap();
 
-        let expression = pack(
-            [(
-                "top",
-                pack([("one", root()), ("two", root())], Nullability::NonNullable),
-            )],
-            Nullability::NonNullable,
-        );
-        assert!(layout.encoding_id() == LayoutId::new_ref("vortex.dict"));
-        let actual = layout
-            .new_reader("".into(), Arc::from(segments))
-            .unwrap()
-            .projection_evaluation(&(0..layout.row_count()), &expression)
-            .unwrap()
-            .invoke(MaskFuture::new_true(layout.row_count().try_into().unwrap()))
-            .await
-            .unwrap();
-        let expected = StructArray::try_new(
-            FieldNames::from([FieldName::from("top")]),
-            vec![
-                StructArray::try_new(
-                    FieldNames::from([FieldName::from("one"), FieldName::from("two")]),
-                    vec![array.clone(), array],
-                    9,
-                    Validity::NonNullable,
+            let expression = pack(
+                [(
+                    "top",
+                    pack([("one", root()), ("two", root())], Nullability::NonNullable),
+                )],
+                Nullability::NonNullable,
+            );
+            assert!(layout.encoding_id() == LayoutId::new_ref("vortex.dict"));
+            let actual = layout
+                .new_reader("".into(), segments)
+                .unwrap()
+                .projection_evaluation(
+                    &(0..layout.row_count()),
+                    &expression,
+                    MaskFuture::new_true(layout.row_count().try_into().unwrap()),
                 )
                 .unwrap()
-                .into_array(),
-            ],
-            9,
-            Validity::NonNullable,
-        )
-        .unwrap()
-        .into_array();
-        let actual = actual.into_arrow_preferred().unwrap();
-        let expected_arrow_dtype = expected.dtype().to_arrow_dtype().unwrap();
-        let expected = expected.into_arrow(&expected_arrow_dtype).unwrap();
-        assert_eq!(actual.data_type(), expected.data_type());
-        assert_eq!(&actual, &expected);
+                .await
+                .unwrap();
+            let expected = StructArray::try_new(
+                FieldNames::from([FieldName::from("top")]),
+                vec![
+                    StructArray::try_new(
+                        FieldNames::from([FieldName::from("one"), FieldName::from("two")]),
+                        vec![array.clone(), array],
+                        9,
+                        Validity::NonNullable,
+                    )
+                    .unwrap()
+                    .into_array(),
+                ],
+                9,
+                Validity::NonNullable,
+            )
+            .unwrap()
+            .into_array();
+            let actual = actual.into_arrow_preferred().unwrap();
+            let expected_arrow_dtype = expected.dtype().to_arrow_dtype().unwrap();
+            let expected = expected.into_arrow(&expected_arrow_dtype).unwrap();
+            assert_eq!(actual.data_type(), expected.data_type());
+            assert_eq!(&actual, &expected);
+        })
     }
 
     #[rstest]
@@ -347,116 +319,124 @@ mod tests {
         "", // Filter for empty string
         vec![false, false, false], // Expected: all false, no dict values match
     )]
-    #[tokio::test]
-    async fn shortpathes_filtering(
+    #[test]
+    fn shortpathes_filtering(
         #[case] data: Vec<Option<&str>>,
         #[case] filter_value: &str,
         #[case] expected: Vec<bool>,
     ) {
-        let strategy = DictStrategy::new(
-            FlatLayoutStrategy::default(),
-            FlatLayoutStrategy::default(),
-            FlatLayoutStrategy::default(),
-            DictLayoutOptions::default(),
-            Arc::new(LocalExecutor),
-        );
+        block_on(|handle| async move {
+            let strategy = DictStrategy::new(
+                FlatLayoutStrategy::default(),
+                FlatLayoutStrategy::default(),
+                FlatLayoutStrategy::default(),
+                DictLayoutOptions::default(),
+            );
 
-        let array = VarBinArray::from_iter(data, DType::Utf8(Nullability::Nullable)).to_array();
+            let array = VarBinArray::from_iter(data, DType::Utf8(Nullability::Nullable)).to_array();
 
-        let ctx = ArrayContext::empty();
-        let segments = TestSegments::default();
-        let layout: LayoutRef = block_on(
-            strategy.write_stream(
-                &ctx,
-                SequenceWriter::new(Box::new(segments.clone())),
-                SequentialStreamAdapter::new(
-                    DType::Utf8(Nullability::Nullable),
-                    stream::once(async move { Ok((SequenceId::root().downgrade(), array)) }),
+            let ctx = ArrayContext::empty();
+            let segments = Arc::new(TestSegments::default());
+            let (ptr, eof) = SequenceId::root().split();
+            let layout: LayoutRef = strategy
+                .write_stream(
+                    ctx,
+                    segments.clone(),
+                    SequentialStreamAdapter::new(
+                        DType::Utf8(Nullability::Nullable),
+                        array.to_array_stream().sequenced(ptr),
+                    )
+                    .sendable(),
+                    eof,
+                    handle,
                 )
-                .sendable(),
-            ),
-        )
-        .unwrap();
+                .await
+                .unwrap();
 
-        let filter = vortex_expr::eq(
-            root(),
-            vortex_expr::lit(vortex_scalar::Scalar::utf8(
-                filter_value,
-                Nullability::Nullable,
-            )),
-        );
-        let mask = layout
-            .new_reader("".into(), Arc::from(segments))
-            .unwrap()
-            .filter_evaluation(&(0..3), &filter)
-            .unwrap()
-            .invoke(MaskFuture::new_true(3))
-            .await
-            .unwrap();
+            let filter = vortex_expr::eq(
+                root(),
+                vortex_expr::lit(vortex_scalar::Scalar::utf8(
+                    filter_value,
+                    Nullability::Nullable,
+                )),
+            );
+            let mask = layout
+                .new_reader("".into(), segments)
+                .unwrap()
+                .filter_evaluation(&(0..3), &filter, MaskFuture::new_true(3))
+                .unwrap()
+                .await
+                .unwrap();
 
-        assert_eq!(
-            mask.to_boolean_buffer().iter().collect::<Vec<_>>(),
-            expected
-        );
+            assert_eq!(
+                mask.to_boolean_buffer().iter().collect::<Vec<_>>(),
+                expected
+            );
+        })
     }
 
-    #[tokio::test]
-    async fn reading_is_null_works() {
-        let strategy = DictStrategy::new(
-            FlatLayoutStrategy::default(),
-            FlatLayoutStrategy::default(),
-            FlatLayoutStrategy::default(),
-            DictLayoutOptions::default(),
-            Arc::new(LocalExecutor),
-        );
+    #[test]
+    fn reading_is_null_works() {
+        block_on(|handle| async move {
+            let strategy = DictStrategy::new(
+                FlatLayoutStrategy::default(),
+                FlatLayoutStrategy::default(),
+                FlatLayoutStrategy::default(),
+                DictLayoutOptions::default(),
+            );
 
-        let array = VarBinArray::from_iter(
-            [
-                Some("abc"),
-                Some("def"),
-                None,
-                Some("abc"),
-                Some("def"),
-                None,
-                Some("abc"),
-                Some("def"),
-                None,
-            ],
-            DType::Utf8(Nullability::Nullable),
-        )
-        .to_array();
-        let array_to_write = array.clone();
-        let ctx = ArrayContext::empty();
-        let segments = TestSegments::default();
-        let layout: LayoutRef = block_on(
-            strategy.write_stream(
-                &ctx,
-                SequenceWriter::new(Box::new(segments.clone())),
-                SequentialStreamAdapter::new(
-                    DType::Utf8(Nullability::Nullable),
-                    stream::once(
-                        async move { Ok((SequenceId::root().downgrade(), array_to_write)) },
-                    ),
+            let array = VarBinArray::from_iter(
+                [
+                    Some("abc"),
+                    Some("def"),
+                    None,
+                    Some("abc"),
+                    Some("def"),
+                    None,
+                    Some("abc"),
+                    Some("def"),
+                    None,
+                ],
+                DType::Utf8(Nullability::Nullable),
+            )
+            .to_array();
+            let array_to_write = array.clone();
+            let ctx = ArrayContext::empty();
+            let segments = Arc::new(TestSegments::default());
+            let (ptr, eof) = SequenceId::root().split();
+            let layout: LayoutRef = strategy
+                .write_stream(
+                    ctx,
+                    segments.clone(),
+                    SequentialStreamAdapter::new(
+                        DType::Utf8(Nullability::Nullable),
+                        array_to_write.to_array_stream().sequenced(ptr),
+                    )
+                    .sendable(),
+                    eof,
+                    handle,
                 )
-                .sendable(),
-            ),
-        )
-        .unwrap();
+                .await
+                .unwrap();
 
-        let expression = not(is_null(root())); // easier to test not_is_null b/c that's the validity array
-        assert!(layout.encoding_id() == LayoutId::new_ref("vortex.dict"));
-        let actual = layout
-            .new_reader("".into(), Arc::from(segments))
-            .unwrap()
-            .projection_evaluation(&(0..layout.row_count()), &expression)
-            .unwrap()
-            .invoke(MaskFuture::new_true(layout.row_count().try_into().unwrap()))
-            .await
-            .unwrap();
-        let expected = array.validity_mask().into_array();
-        let actual = actual.into_arrow_preferred().unwrap();
-        let expected = expected.into_arrow_preferred().unwrap();
-        assert_eq!(actual.data_type(), expected.data_type());
-        assert_eq!(&actual, &expected);
+            let expression = not(is_null(root())); // easier to test not_is_null b/c that's the validity array
+            assert!(layout.encoding_id() == LayoutId::new_ref("vortex.dict"));
+            let actual = layout
+                .new_reader("".into(), segments)
+                .unwrap()
+                .projection_evaluation(
+                    &(0..layout.row_count()),
+                    &expression,
+                    MaskFuture::new_true(layout.row_count().try_into().unwrap()),
+                )
+                .unwrap()
+                .await
+                .unwrap();
+            let expected = array.validity_mask().into_array();
+            let actual = actual.into_arrow_preferred().unwrap();
+            let expected = expected.into_arrow_preferred().unwrap();
+            assert_eq!(actual.data_type(), expected.data_type());
+            assert_eq!(&actual, &expected);
+        })
     }
 }

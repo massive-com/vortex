@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-#![allow(unsafe_op_in_unsafe_fn)]
-
 use std::ops::Deref;
 use std::sync::LazyLock;
 
@@ -29,6 +27,7 @@ use log::LevelFilter;
 use pyo3_log::{Caching, Logger};
 use tokio::runtime::Runtime;
 use vortex::error::{VortexError, VortexExpect as _};
+use vortex::io::runtime::tokio::TokioRuntime;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -39,10 +38,14 @@ static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .vortex_expect("tokio runtime must not fail to start")
 });
 
+/// The Vortex runtime instance.
+static RUNTIME: LazyLock<TokioRuntime> =
+    LazyLock::new(|| TokioRuntime::from(TOKIO_RUNTIME.handle()));
+
 /// Vortex is an Apache Arrow-compatible toolkit for working with compressed array data.
 #[pymodule]
 fn _lib(py: Python, m: &Bound<PyModule>) -> PyResult<()> {
-    Python::with_gil(|py| -> PyResult<()> {
+    Python::attach(|py| -> PyResult<()> {
         Logger::new(py, Caching::LoggersAndLevels)?
             .filter(LevelFilter::Info)
             .filter_target("my_module::verbose_submodule".to_owned(), LevelFilter::Warn)

@@ -29,8 +29,7 @@ def ds(tmpdir_factory) -> vx.dataset.VortexDataset:  # pyright: ignore[reportUnk
     assert not os.path.exists(fname)  # pyright: ignore[reportUnknownArgumentType]
 
     a = pa.array([record(x) for x in range(1_000_000)])
-    arr = vx.compress(vx.array(a))
-    vx.io.write(arr, str(fname))  # pyright: ignore[reportUnknownArgumentType]
+    vx.io.write(vx.array(a), str(fname))  # pyright: ignore[reportUnknownArgumentType]
     return vx.dataset.VortexDataset.from_path(str(fname))  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -112,13 +111,13 @@ def test_to_record_batch_reader_with_polars(ds: pd.Dataset):
 def test_duckdb(ds: vx.dataset.VortexDataset):
     assert ds  # pyright cannot determine that ds is used by duckdb.execute
     # This would be a nice test but we do not support IsNotNull which duckdb uses
-    # tbl = duckdb.execute("select * from ds where string >= '950000' and float < 975.0").arrow()
+    # tbl = duckdb.execute("select * from ds where string >= '950000' and float < 975.0").arrow().read_all()
     # assert len(tbl) == 10_000
     # assert tbl.schema == pa.schema(
     #     [("bool", pa.bool_()), ("float", pa.float64()), ("index", pa.int64()), ("string", pa.utf8())]
     # )
 
-    tbl = duckdb.execute("select * from ds").arrow()
+    tbl = duckdb.execute("select * from ds").arrow().read_all()
     assert len(tbl) == 1_000_000
     assert tbl.schema == pa.schema(
         [("bool", pa.bool_()), ("float", pa.float64()), ("index", pa.int64()), ("string", pa.utf8())]
@@ -126,7 +125,7 @@ def test_duckdb(ds: vx.dataset.VortexDataset):
     assert tbl.take([0]).to_pylist()[0] == record(0)
     assert tbl.take([950_000]).to_pylist()[0] == record(950_000)
 
-    tbl = duckdb.execute("select string as hi_mom, float as yolo from ds").arrow()
+    tbl = duckdb.execute("select string as hi_mom, float as yolo from ds").arrow().read_all()
     assert len(tbl) == 1_000_000
     assert tbl.schema == pa.schema([("hi_mom", pa.utf8()), ("yolo", pa.float64())])
 

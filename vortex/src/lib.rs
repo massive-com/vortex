@@ -11,7 +11,7 @@ pub use vortex_array::*;
 pub use vortex_file as file;
 pub use {
     vortex_buffer as buffer, vortex_dtype as dtype, vortex_error as error, vortex_expr as expr,
-    vortex_flatbuffers as flatbuffers, vortex_ipc as ipc, vortex_layout as layout,
+    vortex_flatbuffers as flatbuffers, vortex_io as io, vortex_ipc as ipc, vortex_layout as layout,
     vortex_mask as mask, vortex_metrics as metrics, vortex_proto as proto, vortex_scalar as scalar,
     vortex_scan as scan, vortex_utils as utils,
 };
@@ -41,7 +41,7 @@ pub mod encodings {
 mod test {
     use itertools::Itertools;
     use vortex_array::arrays::PrimitiveArray;
-    use vortex_array::iter::ArrayIteratorExt;
+    use vortex_array::stream::ArrayStreamExt;
     use vortex_array::validity::Validity;
     use vortex_array::vtable::ValidityHelper;
     use vortex_array::{ArrayRef, IntoArray, ToCanonical};
@@ -116,7 +116,7 @@ mod test {
         // Write a Vortex file with the default compression and layout strategy.
         VortexWriteOptions::default()
             .write(
-                tokio::fs::File::create("example.vortex").await?,
+                &mut tokio::fs::File::create("example.vortex").await?,
                 array.to_array_stream(),
             )
             .await?;
@@ -124,13 +124,14 @@ mod test {
         // [write]
 
         // [read]
-        let array = VortexOpenOptions::file()
+        let array = VortexOpenOptions::new()
             .open("example.vortex")
             .await?
             .scan()?
             .with_filter(gt(root(), lit(2u64)))
-            .into_array_iter()?
-            .read_all()?;
+            .into_array_stream()?
+            .read_all()
+            .await?;
 
         assert_eq!(array.len(), 2);
 
@@ -153,18 +154,19 @@ mod test {
                     .build(),
             )
             .write(
-                tokio::fs::File::create("example_compact.vortex").await?,
+                &mut tokio::fs::File::create("example_compact.vortex").await?,
                 array.to_array_stream(),
             )
             .await?;
 
         // [compact read]
-        let recovered_array = VortexOpenOptions::file()
+        let recovered_array = VortexOpenOptions::new()
             .open("example_compact.vortex")
             .await?
             .scan()?
-            .into_array_iter()?
-            .read_all()?;
+            .into_array_stream()?
+            .read_all()
+            .await?;
 
         assert_eq!(recovered_array.len(), array.len());
         let recovered_primitive = recovered_array.to_primitive();

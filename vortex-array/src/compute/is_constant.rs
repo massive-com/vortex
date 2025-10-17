@@ -23,6 +23,10 @@ static IS_CONSTANT_FN: LazyLock<ComputeFn> = LazyLock::new(|| {
     compute
 });
 
+pub(crate) fn warm_up_vtable() -> usize {
+    IS_CONSTANT_FN.kernels().len()
+}
+
 /// Computes whether an array has constant values. If the array's encoding doesn't implement the
 /// relevant VTable, it'll try and canonicalize in order to make a determination.
 ///
@@ -46,16 +50,14 @@ pub fn is_constant(array: &dyn Array) -> VortexResult<Option<bool>> {
 ///
 /// Please see [`is_constant`] for a more detailed explanation of its behavior.
 pub fn is_constant_opts(array: &dyn Array, options: &IsConstantOpts) -> VortexResult<Option<bool>> {
-    let result = IS_CONSTANT_FN
+    Ok(IS_CONSTANT_FN
         .invoke(&InvocationArgs {
             inputs: &[array.into()],
             options,
         })?
         .unwrap_scalar()?
         .as_bool()
-        .value();
-
-    Ok(result)
+        .value())
 }
 
 struct IsConstant;
@@ -288,18 +290,21 @@ impl IsConstantOpts {
 
 #[cfg(test)]
 mod tests {
+    use vortex_buffer::buffer;
+
+    use crate::IntoArray as _;
     use crate::arrays::PrimitiveArray;
     use crate::stats::Stat;
 
     #[test]
     fn is_constant_min_max_no_nan() {
-        let arr = PrimitiveArray::from_iter([0, 1]);
+        let arr = buffer![0, 1].into_array();
         arr.statistics()
             .compute_all(&[Stat::Min, Stat::Max])
             .unwrap();
         assert!(!arr.is_constant());
 
-        let arr = PrimitiveArray::from_iter([0, 0]);
+        let arr = buffer![0, 0].into_array();
         arr.statistics()
             .compute_all(&[Stat::Min, Stat::Max])
             .unwrap();

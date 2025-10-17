@@ -17,17 +17,18 @@ use vortex_mask::Mask;
 use vortex_scalar::Scalar;
 
 use crate::arrays::{
-    BoolEncoding, ConstantVTable, DecimalEncoding, ExtensionEncoding, ListEncoding, NullEncoding,
-    PrimitiveEncoding, StructEncoding, VarBinEncoding, VarBinViewEncoding,
+    BoolEncoding, ConstantVTable, DecimalEncoding, ExtensionEncoding, FixedSizeListEncoding,
+    ListEncoding, NullEncoding, PrimitiveEncoding, StructEncoding, VarBinEncoding,
+    VarBinViewEncoding,
 };
 use crate::builders::ArrayBuilder;
 use crate::compute::{ComputeFn, Cost, InvocationArgs, IsConstantOpts, Output, is_constant_opts};
-use crate::pipeline::{OperatorRef, PipelineVTable};
+use crate::operator::OperatorRef;
 use crate::serde::ArrayChildren;
 use crate::stats::{Precision, Stat, StatsProviderExt, StatsSetRef};
 use crate::vtable::{
-    ArrayVTable, CanonicalVTable, ComputeVTable, OperationsVTable, SerdeVTable, VTable,
-    ValidityVTable, VisitorVTable,
+    ArrayVTable, CanonicalVTable, ComputeVTable, OperationsVTable, PipelineVTable, SerdeVTable,
+    VTable, ValidityVTable, VisitorVTable,
 };
 use crate::{Canonical, EncodingId, EncodingRef, SerializeMetadata};
 
@@ -88,6 +89,7 @@ pub trait Array: 'static + private::Sealed + Send + Sync + Debug + ArrayVisitor 
             || self.is_encoding(DecimalEncoding.id())
             || self.is_encoding(StructEncoding.id())
             || self.is_encoding(ListEncoding.id())
+            || self.is_encoding(FixedSizeListEncoding.id())
             || self.is_encoding(VarBinViewEncoding.id())
             || self.is_encoding(ExtensionEncoding.id())
     }
@@ -151,9 +153,9 @@ pub trait Array: 'static + private::Sealed + Send + Sync + Debug + ArrayVisitor 
     fn invoke(&self, compute_fn: &ComputeFn, args: &InvocationArgs)
     -> VortexResult<Option<Output>>;
 
-    /// Convert the array to a pipeline operator if supported by the encoding.
+    /// Convert the array to a operator operator if supported by the encoding.
     ///
-    /// Returns `None` if the encoding does not support pipeline operations.
+    /// Returns `None` if the encoding does not support operator operations.
     fn to_operator(&self) -> VortexResult<Option<OperatorRef>>;
 }
 

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use vortex_buffer::buffer;
 use vortex_dtype::{DType, Nullability, PType};
 use vortex_scalar::Scalar;
 
@@ -16,7 +17,7 @@ fn test_nullable_fsl_with_nulls() {
     let list_size = 2;
 
     // Create FSL with some null lists.
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5, 6, 7, 8]);
+    let elements = buffer![1i32, 2, 3, 4, 5, 6, 7, 8].into_array();
     let validity = Validity::from_iter([true, false, true, false]);
     let fsl = FixedSizeListArray::new(elements.into_array(), list_size, validity, len);
 
@@ -36,7 +37,7 @@ fn test_nullable_fsl_with_nulls() {
     );
 
     // Check individual elements of the first list.
-    let first_list = fsl.fixed_size_list_at(0);
+    let first_list = fsl.fixed_size_list_elements_at(0);
     assert_eq!(first_list.scalar_at(0), 1i32.into());
     assert_eq!(first_list.scalar_at(1), 2i32.into());
 
@@ -57,7 +58,7 @@ fn test_nullable_fsl_with_nulls() {
     );
 
     // Check individual elements of the third list.
-    let third_list = fsl.fixed_size_list_at(2);
+    let third_list = fsl.fixed_size_list_elements_at(2);
     assert_eq!(third_list.scalar_at(0), 5i32.into());
     assert_eq!(third_list.scalar_at(1), 6i32.into());
 
@@ -136,7 +137,7 @@ fn test_nullable_elements_and_nullable_lists() {
     );
 
     // Check individual elements of the first list.
-    let first_list = fsl.fixed_size_list_at(0);
+    let first_list = fsl.fixed_size_list_elements_at(0);
     assert_eq!(first_list.scalar_at(0), Some(10u16).into());
     assert_eq!(first_list.scalar_at(1), None::<u16>.into());
 
@@ -157,7 +158,7 @@ fn test_nullable_elements_and_nullable_lists() {
     );
 
     // Check individual elements of the third list.
-    let third_list = fsl.fixed_size_list_at(2);
+    let third_list = fsl.fixed_size_list_elements_at(2);
     assert_eq!(third_list.scalar_at(0), None::<u16>.into());
     assert_eq!(third_list.scalar_at(1), None::<u16>.into());
 }
@@ -168,7 +169,7 @@ fn test_alternating_nulls() {
     let list_size = 1;
 
     // Alternating null and valid single-element lists.
-    let elements = PrimitiveArray::from_iter([1u8, 2, 3, 4, 5, 6]);
+    let elements = buffer![1u8, 2, 3, 4, 5, 6].into_array();
     let validity = Validity::from_iter([true, false, true, false, true, false]);
     let fsl = FixedSizeListArray::new(elements.into_array(), list_size, validity, len);
 
@@ -200,16 +201,11 @@ fn test_validity_types() {
     let list_size = 2;
 
     // Test with different validity buffer configurations.
-    let elements = PrimitiveArray::from_iter([1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let elements = buffer![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0].into_array();
 
     // Test with AllInvalid.
     {
-        let fsl = FixedSizeListArray::new(
-            elements.clone().into_array(),
-            list_size,
-            Validity::AllInvalid,
-            len,
-        );
+        let fsl = FixedSizeListArray::new(elements.clone(), list_size, Validity::AllInvalid, len);
         for i in 0..len {
             assert!(fsl.scalar_at(i).is_null());
         }
@@ -219,7 +215,7 @@ fn test_validity_types() {
     {
         let validity_array = BoolArray::from_iter([true, true, false, true]);
         let fsl = FixedSizeListArray::new(
-            elements.into_array(),
+            elements,
             list_size,
             Validity::Array(validity_array.into_array()),
             len,

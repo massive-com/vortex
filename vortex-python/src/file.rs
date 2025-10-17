@@ -9,11 +9,12 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use vortex::compute::cast;
 use vortex::dtype::Nullability::NonNullable;
-use vortex::dtype::{DType, PType};
+use vortex::dtype::{DType, FieldNames, PType};
 use vortex::error::VortexResult;
 use vortex::expr::{ExprRef, root, select};
-use vortex::file::segments::MokaSegmentCache;
 use vortex::file::{VortexFile, VortexOpenOptions};
+use vortex::io::runtime::BlockingRuntime;
+use vortex::layout::segments::MokaSegmentCache;
 use vortex::scan::{ScanBuilder, SplitBy};
 use vortex::{ArrayRef, ToCanonical};
 
@@ -22,9 +23,9 @@ use crate::arrow::IntoPyArrow;
 use crate::dataset::PyVortexDataset;
 use crate::dtype::PyDType;
 use crate::expr::PyExpr;
-use crate::install_module;
 use crate::iter::PyArrayIterator;
 use crate::scan::PyRepeatedScan;
+use crate::{RUNTIME, install_module};
 
 pub(crate) fn init(py: Python, parent: &Bound<PyModule>) -> PyResult<()> {
     let m = PyModule::new(py, "file")?;
@@ -40,15 +41,17 @@ pub(crate) fn init(py: Python, parent: &Bound<PyModule>) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (path, *, without_segment_cache = false))]
 pub fn open(path: &str, without_segment_cache: bool) -> PyResult<PyVortexFile> {
-    let mut options = VortexOpenOptions::file();
-    if without_segment_cache {
-        options = options.without_segment_cache();
-    } else {
-        // TODO(ngates): use a globally shared segment cache for all files
-        options = options.with_segment_cache(Arc::new(MokaSegmentCache::new(256 << 20)));
-    }
+    let vxf = RUNTIME.block_on(|h| async move {
+        let mut options = VortexOpenOptions::new();
+        if without_segment_cache {
+            options = options.without_segment_cache();
+        } else {
+            // TODO(ngates): use a globally shared segment cache for all files
+            options = options.with_segment_cache(Arc::new(MokaSegmentCache::new(256 << 20)));
+        }
+        options.with_handle(h).open(path).await
+    })?;
 
-    let vxf = options.open_blocking(path)?;
     Ok(PyVortexFile { vxf })
 }
 
@@ -84,7 +87,7 @@ impl PyVortexFile {
         )?;
 
         Ok(PyArrayIterator::new(Box::new(
-            builder.into_array_iter_multithread()?,
+            builder.into_array_iter(&*RUNTIME)?,
         )))
     }
 
@@ -117,10 +120,10 @@ impl PyVortexFile {
         projection: Option<PyIntoProjection>,
         expr: Option<PyExpr>,
         batch_size: Option<usize>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let vxf = slf.get().vxf.clone();
 
-        let reader = slf.py().allow_threads(|| {
+        let reader = slf.py().detach(|| {
             let mut builder = vxf
                 .scan()?
                 .with_some_filter(expr.map(|e| e.into_inner()))
@@ -131,7 +134,7 @@ impl PyVortexFile {
             }
 
             let schema = Arc::new(builder.dtype()?.to_arrow_schema()?);
-            builder.into_record_batch_reader_multithread(schema)
+            builder.into_record_batch_reader(schema, &*RUNTIME)
         })?;
 
         let rbr: Box<dyn RecordBatchReader + Send> = Box::new(reader);
@@ -164,6 +167,7 @@ impl PyVortexFile {
         let mut builder = self
             .vxf
             .scan()?
+            .with_handle(RUNTIME.handle())
             .with_some_filter(expr)
             .with_projection(projection.unwrap_or_else(root));
 
@@ -193,7 +197,7 @@ impl<'py> FromPyObject<'py> for PyIntoProjection {
                 .map(|item| item.extract::<String>())
                 .collect::<PyResult<Vec<String>>>()?;
             return Ok(PyIntoProjection(select(
-                cols.into_iter().map(Arc::<str>::from).collect::<Vec<_>>(),
+                cols.into_iter().collect::<FieldNames>(),
                 root(),
             )));
         }

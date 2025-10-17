@@ -16,20 +16,21 @@ use url::Url;
 use vortex::arrow::FromArrowArray;
 use vortex::dtype::DType;
 use vortex::error::{VortexResult, vortex_bail, vortex_err};
-use vortex::file::{VortexWriteOptions, WriteStrategyBuilder};
+use vortex::file::{VortexWriteOptions, WriteSummary};
+use vortex::io::{ObjectStoreWriter, VortexWrite};
 use vortex::stream::ArrayStreamAdapter;
 use vortex::utils::aliases::hash_map::HashMap;
 use vortex::{Array, ArrayRef};
 
 use crate::errors::{JNIError, try_or_throw};
 use crate::object_store::make_object_store;
-use crate::{block_on, get_process_task_executor, spawn};
+use crate::{block_on, spawn};
 
 /// Native writer around a file writer.
 pub struct NativeWriter {
     /// Handle to the write operation, launched onto the global runtime.
     /// It will unwrap to () if the write succeeded, or to a VortexError with the reason if it fails.
-    handle: Option<JoinHandle<VortexResult<()>>>,
+    handle: Option<JoinHandle<VortexResult<WriteSummary>>>,
     /// Vortex schema for all batches.
     write_schema: DType,
     /// Ingest arrays into the handle.
@@ -40,7 +41,7 @@ impl NativeWriter {
     /// Create a new writer which tracks a write task and a join handle instead.
     pub fn new(
         write_schema: DType,
-        handle: JoinHandle<VortexResult<()>>,
+        handle: JoinHandle<VortexResult<WriteSummary>>,
         sender: mpsc::Sender<VortexResult<ArrayRef>>,
     ) -> Self {
         Self {
@@ -111,8 +112,11 @@ impl NativeWriter {
         // Join the write handle, which completes after all chunks have been flushed and the file
         // stream is closed.
 
-        block_on("NativeWriter::close", handle)
-            .map_err(|join| vortex_err!("NativeWriter::close: error joining write task: {join}"))?
+        block_on("NativeWriter::close", handle).map_err(|join| {
+            vortex_err!("NativeWriter::close: error joining write task: {join}")
+        })??;
+
+        Ok(())
     }
 }
 
@@ -161,14 +165,10 @@ pub extern "system" fn Java_dev_vortex_jni_NativeWriterMethods_create(
 
         let (store, _scheme) = make_object_store(&url, &properties)?;
         let write_handle = spawn(async move {
-            VortexWriteOptions::default()
-                .with_strategy(
-                    WriteStrategyBuilder::new()
-                        .with_executor(get_process_task_executor())
-                        .build(),
-                )
-                .write_object_store(&store, &path, w)
-                .await
+            let mut write = ObjectStoreWriter::new(store, &path).await?;
+            let summary = VortexWriteOptions::default().write(&mut write, w).await?;
+            write.shutdown().await?;
+            Ok(summary)
         });
 
         Ok(Box::new(NativeWriter::new(write_schema, write_handle, tx)).into_raw())

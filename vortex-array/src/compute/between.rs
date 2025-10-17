@@ -25,6 +25,10 @@ static BETWEEN_FN: LazyLock<ComputeFn> = LazyLock::new(|| {
     compute
 });
 
+pub(crate) fn warm_up_vtable() -> usize {
+    BETWEEN_FN.kernels().len()
+}
+
 /// Compute between (a <= x <= b).
 ///
 /// This is an optimized implementation that is equivalent to `(a <= x) AND (x <= b)`.
@@ -262,11 +266,11 @@ impl StrictComparison {
 
 #[cfg(test)]
 mod tests {
+    use vortex_buffer::buffer;
     use vortex_dtype::{Nullability, PType};
 
     use super::*;
     use crate::ToCanonical;
-    use crate::arrays::PrimitiveArray;
     use crate::compute::conformance::search_sorted::rstest;
     use crate::test_harness::to_int_indices;
 
@@ -280,9 +284,9 @@ mod tests {
         #[case] upper_strict: StrictComparison,
         #[case] expected: Vec<u64>,
     ) {
-        let lower = PrimitiveArray::from_iter([0, 0, 0, 0, 2]);
-        let array = PrimitiveArray::from_iter([1, 0, 1, 0, 1]);
-        let upper = PrimitiveArray::from_iter([2, 1, 1, 0, 0]);
+        let lower = buffer![0, 0, 0, 0, 2].into_array();
+        let array = buffer![1, 0, 1, 0, 1].into_array();
+        let upper = buffer![2, 1, 1, 0, 0].into_array();
 
         let matches = between(
             array.as_ref(),
@@ -302,8 +306,8 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        let lower = PrimitiveArray::from_iter([0, 0, 2, 0, 2]);
-        let array = PrimitiveArray::from_iter([1, 0, 1, 0, 1]);
+        let lower = buffer![0, 0, 2, 0, 2].into_array();
+        let array = buffer![1, 0, 1, 0, 1].into_array();
 
         // upper is null
         let upper = ConstantArray::new(

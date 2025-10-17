@@ -21,6 +21,7 @@ use vortex::error::{VortexError, VortexResult, vortex_bail, vortex_err};
 use vortex::expr::proto::deserialize_expr_proto;
 use vortex::expr::{ExprRef, ExprRegistryExt};
 use vortex::file::{VortexFile, VortexOpenOptions, VortexWriteOptions};
+use vortex::io::runtime::tokio::TokioRuntime;
 use vortex::proto::expr::Expr;
 use vortex::scan::{ScanBuilder, SplitBy};
 
@@ -29,10 +30,10 @@ use crate::array_iterator::vx_array_iterator;
 use crate::dtype::vx_dtype;
 use crate::error::{try_or_default, vx_error};
 use crate::session::{FileKey, vx_session};
-use crate::{arc_wrapper, get_runtime, to_string_vec};
+use crate::{arc_wrapper, get_runtime, get_vx_runtime, to_string_vec};
 
 arc_wrapper!(
-    /// A handle to a Vortex file encapsulating ther footer and logic for instantiating a reader.
+    /// A handle to a Vortex file encapsulating the footer and logic for instantiating a reader.
     VortexFile,
     vx_file
 );
@@ -158,7 +159,7 @@ pub unsafe extern "C-unwind" fn vx_file_open_reader(
 
         let object_store = make_object_store(&uri, &prop_keys, &prop_vals)?;
 
-        let mut file = VortexOpenOptions::file();
+        let mut file = VortexOpenOptions::new().with_handle(TokioRuntime::current());
         let mut cache_hit = false;
         if let Some(footer) = session.get_footer(&FileKey {
             location: uri_str.to_string(),
@@ -264,8 +265,9 @@ pub unsafe extern "C-unwind" fn vx_file_scan(
         )?;
 
         let layout_reader = file.layout_reader()?;
-        let mut scan_builder =
-            ScanBuilder::new(layout_reader).with_row_offset(scan_options.row_offset);
+        let mut scan_builder = ScanBuilder::new(layout_reader)
+            .with_handle(TokioRuntime::current())
+            .with_row_offset(scan_options.row_offset);
 
         // Apply options if provided.
         if let Some(projection_expr) = scan_options.projection_expr {
@@ -284,9 +286,9 @@ pub unsafe extern "C-unwind" fn vx_file_scan(
             scan_builder = scan_builder.with_split_by(split_by_value);
         }
 
-        Ok(vx_array_iterator::new(Box::new(
-            scan_builder.into_array_iter()?,
-        )))
+        let iter = scan_builder.into_array_iter(&get_vx_runtime())?;
+
+        Ok(vx_array_iterator::new(Box::new(iter)))
     })
 }
 

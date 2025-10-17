@@ -5,14 +5,12 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use futures::future::ready;
+use futures::future::BoxFuture;
 use futures::stream::FuturesOrdered;
 use futures::{FutureExt, TryStreamExt};
-use itertools::Itertools;
-use vortex_array::ArrayRef;
 use vortex_array::arrays::ChunkedArray;
 use vortex_array::stats::Precision;
+use vortex_array::{ArrayRef, MaskFuture};
 use vortex_dtype::{DType, FieldMask};
 use vortex_error::{VortexExpect, VortexResult, vortex_panic};
 use vortex_expr::ExprRef;
@@ -21,10 +19,7 @@ use vortex_mask::Mask;
 use crate::layouts::chunked::ChunkedLayout;
 use crate::reader::LayoutReader;
 use crate::segments::SegmentSource;
-use crate::{
-    ArrayEvaluation, LayoutReaderRef, LazyReaderChildren, MaskEvaluation, MaskFuture,
-    PruningEvaluation,
-};
+use crate::{LayoutReaderRef, LazyReaderChildren};
 
 /// A [`LayoutReader`] for chunked layouts.
 pub struct ChunkedReader {
@@ -172,21 +167,36 @@ impl LayoutReader for ChunkedReader {
         &self,
         row_range: &Range<u64>,
         expr: &ExprRef,
-    ) -> VortexResult<Box<dyn PruningEvaluation>> {
+        mask: Mask,
+    ) -> VortexResult<MaskFuture> {
         let mut chunk_evals = vec![];
-        let mut mask_ranges = vec![];
 
         for (chunk_idx, chunk_range, mask_range) in self.ranges(row_range) {
             let chunk_reader = self.chunk_reader(chunk_idx)?;
-            let chunk_eval = chunk_reader.pruning_evaluation(&chunk_range, expr)?;
+            let chunk_eval =
+                chunk_reader.pruning_evaluation(&chunk_range, expr, mask.slice(mask_range))?;
+
             chunk_evals.push(chunk_eval);
-            mask_ranges.push(mask_range);
         }
 
-        Ok(Box::new(ChunkedPruningEvaluation {
-            name: self.name.clone(),
-            chunk_evals,
-            mask_ranges,
+        let name = self.name.clone();
+        Ok(MaskFuture::new(mask.len(), async move {
+            log::debug!(
+                "Chunked pruning evaluation {} (mask = {})",
+                name,
+                mask.density()
+            );
+
+            // Split the mask over each chunk.
+            let masks: Vec<_> = FuturesOrdered::from_iter(chunk_evals).try_collect().await?;
+
+            // If there is only one mask, we can return it directly.
+            if masks.len() == 1 {
+                return Ok(masks.into_iter().next().vortex_expect("one mask"));
+            }
+
+            // Combine the masks.
+            Ok(Mask::from_iter(masks))
         }))
     }
 
@@ -194,21 +204,31 @@ impl LayoutReader for ChunkedReader {
         &self,
         row_range: &Range<u64>,
         expr: &ExprRef,
-    ) -> VortexResult<Box<dyn MaskEvaluation>> {
+        mask: MaskFuture,
+    ) -> VortexResult<MaskFuture> {
         let mut chunk_evals = vec![];
-        let mut mask_ranges = vec![];
 
         for (chunk_idx, chunk_range, mask_range) in self.ranges(row_range) {
             let chunk_reader = self.chunk_reader(chunk_idx)?;
-            let chunk_eval = chunk_reader.filter_evaluation(&chunk_range, expr)?;
+            let chunk_eval =
+                chunk_reader.filter_evaluation(&chunk_range, expr, mask.slice(mask_range))?;
             chunk_evals.push(chunk_eval);
-            mask_ranges.push(mask_range);
         }
 
-        Ok(Box::new(ChunkedMaskEvaluation {
-            name: self.name.clone(),
-            chunk_evals,
-            mask_ranges,
+        let name = self.name.clone();
+        Ok(MaskFuture::new(mask.len(), async move {
+            log::debug!("Chunked mask evaluation {}", name);
+
+            // Split the mask over each chunk.
+            let masks: Vec<_> = FuturesOrdered::from_iter(chunk_evals).try_collect().await?;
+
+            // If there is only one mask, we can return it directly.
+            if masks.len() == 1 {
+                return Ok(masks.into_iter().next().vortex_expect("one mask"));
+            }
+
+            // Combine the masks.
+            Ok(Mask::from_iter(masks))
         }))
     }
 
@@ -216,128 +236,31 @@ impl LayoutReader for ChunkedReader {
         &self,
         row_range: &Range<u64>,
         expr: &ExprRef,
-    ) -> VortexResult<Box<dyn ArrayEvaluation>> {
+        mask: MaskFuture,
+    ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
         let dtype = expr.return_dtype(self.dtype())?;
         let mut chunk_evals = vec![];
-        let mut mask_ranges = vec![];
 
         for (chunk_idx, chunk_range, mask_range) in self.ranges(row_range) {
             let chunk_reader = self.chunk_reader(chunk_idx)?;
-            let chunk_eval = chunk_reader.projection_evaluation(&chunk_range, expr)?;
+            let chunk_eval =
+                chunk_reader.projection_evaluation(&chunk_range, expr, mask.slice(mask_range))?;
             chunk_evals.push(chunk_eval);
-            mask_ranges.push(mask_range);
         }
 
-        Ok(Box::new(ChunkedArrayEvaluation {
-            dtype,
-            chunk_evals,
-            mask_ranges,
-        }))
-    }
-}
+        Ok(async move {
+            // Split the mask over each chunk.
+            let chunks: Vec<_> = FuturesOrdered::from_iter(chunk_evals).try_collect().await?;
 
-struct ChunkedPruningEvaluation {
-    name: Arc<str>,
-    chunk_evals: Vec<Box<dyn PruningEvaluation>>,
-    mask_ranges: Vec<Range<usize>>,
-}
+            // If there is only one chunk, we can return it directly.
+            if chunks.len() == 1 {
+                return Ok(chunks.into_iter().next().vortex_expect("one chunk"));
+            }
 
-#[async_trait]
-impl PruningEvaluation for ChunkedPruningEvaluation {
-    async fn invoke(&self, mask: Mask) -> VortexResult<Mask> {
-        log::debug!(
-            "Chunked pruning evaluation {} (mask = {})",
-            self.name,
-            mask.density()
-        );
-
-        // Split the mask over each chunk.
-        let masks: Vec<_> = FuturesOrdered::from_iter(
-            self.mask_ranges
-                .iter()
-                .map(|range| mask.slice(range.clone()))
-                .zip_eq(&self.chunk_evals)
-                .map(|(mask, chunk_eval)| {
-                    if mask.all_false() {
-                        // If the mask is all false, we can skip the evaluation.
-                        ready(Ok(mask)).boxed()
-                    } else {
-                        chunk_eval.invoke(mask).boxed()
-                    }
-                }),
-        )
-        .try_collect()
-        .await?;
-
-        // If there is only one mask, we can return it directly.
-        if masks.len() == 1 {
-            return Ok(masks.into_iter().next().vortex_expect("one mask"));
+            // Combine the arrays.
+            Ok(ChunkedArray::try_new(chunks, dtype)?.to_array())
         }
-
-        // Combine the masks.
-        Ok(Mask::from_iter(masks))
-    }
-}
-
-struct ChunkedMaskEvaluation {
-    name: Arc<str>,
-    chunk_evals: Vec<Box<dyn MaskEvaluation>>,
-    mask_ranges: Vec<Range<usize>>,
-}
-
-#[async_trait]
-impl MaskEvaluation for ChunkedMaskEvaluation {
-    async fn invoke(&self, mask: MaskFuture) -> VortexResult<Mask> {
-        log::debug!("Chunked mask evaluation {}", self.name,);
-
-        // Split the mask over each chunk.
-        let masks: Vec<_> = FuturesOrdered::from_iter(
-            self.mask_ranges
-                .iter()
-                .map(|range| mask.slice(range.clone()))
-                .zip_eq(&self.chunk_evals)
-                .map(|(mask, chunk_eval)| chunk_eval.invoke(mask).boxed()),
-        )
-        .try_collect()
-        .await?;
-
-        // If there is only one mask, we can return it directly.
-        if masks.len() == 1 {
-            return Ok(masks.into_iter().next().vortex_expect("one mask"));
-        }
-
-        // Combine the masks.
-        Ok(Mask::from_iter(masks))
-    }
-}
-
-struct ChunkedArrayEvaluation {
-    dtype: DType,
-    chunk_evals: Vec<Box<dyn ArrayEvaluation>>,
-    mask_ranges: Vec<Range<usize>>,
-}
-
-#[async_trait]
-impl ArrayEvaluation for ChunkedArrayEvaluation {
-    async fn invoke(&self, mask: MaskFuture) -> VortexResult<ArrayRef> {
-        // Split the mask over each chunk.
-        let chunks: Vec<_> = FuturesOrdered::from_iter(
-            self.mask_ranges
-                .iter()
-                .map(|range| mask.slice(range.clone()))
-                .zip_eq(&self.chunk_evals)
-                .map(|(mask, chunk_eval)| chunk_eval.invoke(mask)),
-        )
-        .try_collect()
-        .await?;
-
-        // If there is only one chunk, we can return it directly.
-        if chunks.len() == 1 {
-            return Ok(chunks.into_iter().next().vortex_expect("one chunk"));
-        }
-
-        // Combine the arrays.
-        Ok(ChunkedArray::try_new(chunks, self.dtype.clone())?.to_array())
+        .boxed())
     }
 }
 
@@ -345,35 +268,32 @@ impl ArrayEvaluation for ChunkedArrayEvaluation {
 mod test {
     use std::sync::Arc;
 
-    use futures::executor::block_on;
     use futures::stream;
     use rstest::{fixture, rstest};
-    use vortex_array::{ArrayContext, IntoArray, ToCanonical};
+    use vortex_array::{ArrayContext, IntoArray, MaskFuture, ToCanonical};
     use vortex_buffer::buffer;
     use vortex_dtype::Nullability::NonNullable;
     use vortex_dtype::{DType, PType};
     use vortex_expr::root;
+    use vortex_io::runtime::single::block_on;
 
     use crate::layouts::chunked::writer::ChunkedLayoutStrategy;
     use crate::layouts::flat::writer::FlatLayoutStrategy;
-    use crate::segments::{SegmentSource, SequenceWriter, TestSegments};
-    use crate::sequence::SequenceId;
-    use crate::{
-        LayoutRef, LayoutStrategy, MaskFuture, SequentialStreamAdapter, SequentialStreamExt as _,
-    };
+    use crate::segments::{SegmentSource, TestSegments};
+    use crate::sequence::{SequenceId, SequentialStreamAdapter, SequentialStreamExt as _};
+    use crate::{LayoutRef, LayoutStrategy};
 
     #[fixture]
     /// Create a chunked layout with three chunks of primitive arrays.
     fn chunked_layout() -> (Arc<dyn SegmentSource>, LayoutRef) {
         let ctx = ArrayContext::empty();
-        let segments = TestSegments::default();
-        let sequence_writer = SequenceWriter::new(Box::new(segments.clone()));
+        let segments = Arc::new(TestSegments::default());
         let strategy = ChunkedLayoutStrategy::new(FlatLayoutStrategy::default());
-        let mut sequence_id = SequenceId::root();
-        let layout = block_on(
+        let (mut sequence_id, eof) = SequenceId::root().split();
+        let layout = block_on(|handle| {
             strategy.write_stream(
-                &ctx,
-                sequence_writer,
+                ctx,
+                segments.clone(),
                 SequentialStreamAdapter::new(
                     DType::Primitive(PType::I32, NonNullable),
                     stream::iter([
@@ -383,26 +303,29 @@ mod test {
                     ]),
                 )
                 .sendable(),
-            ),
-        )
+                eof,
+                handle,
+            )
+        })
         .unwrap();
 
-        (Arc::new(segments), layout)
+        (segments, layout)
     }
 
     #[rstest]
     fn test_chunked_evaluator(
         #[from(chunked_layout)] (segments, layout): (Arc<dyn SegmentSource>, LayoutRef),
     ) {
-        block_on(async {
+        block_on(|_h| async {
             let result = layout
                 .new_reader("".into(), segments)
                 .unwrap()
-                .projection_evaluation(&(0..layout.row_count()), &root())
+                .projection_evaluation(
+                    &(0..layout.row_count()),
+                    &root(),
+                    MaskFuture::new_true(usize::try_from(layout.row_count()).unwrap()),
+                )
                 .unwrap()
-                .invoke(MaskFuture::new_true(
-                    usize::try_from(layout.row_count()).unwrap(),
-                ))
                 .await
                 .unwrap()
                 .to_primitive();

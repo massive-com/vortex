@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use humansize::{DECIMAL, make_format};
+use itertools::Itertools;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -9,18 +12,18 @@ use ratatui::text::Text;
 use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, Paragraph, Row, StatefulWidget, Table, Widget, Wrap,
 };
+use tokio::runtime::Handle;
+use tokio::task::block_in_place;
 use vortex::error::VortexExpect;
 use vortex::expr::root;
-use vortex::layout::MaskFuture;
 use vortex::layout::layouts::flat::FlatVTable;
 use vortex::layout::layouts::zoned::ZonedVTable;
-use vortex::{Array, ArrayRef, ToCanonical};
+use vortex::{Array, ArrayRef, MaskFuture, ToCanonical};
 
-use crate::TOKIO_RUNTIME;
 use crate::browse::app::{AppState, LayoutCursor};
 
 /// Render the Layouts tab.
-pub fn render_layouts(app_state: &mut AppState, area: Rect, buf: &mut Buffer) {
+pub fn render_layouts(app_state: &mut AppState<'_>, area: Rect, buf: &mut Buffer) {
     let [header_area, detail_area] =
         Layout::vertical([Constraint::Length(10), Constraint::Min(1)]).areas(area);
 
@@ -89,7 +92,7 @@ fn render_layout_header(cursor: &LayoutCursor, area: Rect, buf: &mut Buffer) {
 }
 
 /// Render the inner Array for a FlatLayout
-fn render_array(app: &AppState, area: Rect, buf: &mut Buffer, is_stats_table: bool) {
+fn render_array(app: &AppState<'_>, area: Rect, buf: &mut Buffer, is_stats_table: bool) {
     let row_count = app.cursor.layout().row_count();
     let reader = app
         .cursor
@@ -97,16 +100,21 @@ fn render_array(app: &AppState, area: Rect, buf: &mut Buffer, is_stats_table: bo
         .new_reader("".into(), app.vxf.segment_source())
         .vortex_expect("Failed to create reader");
 
-    let array = TOKIO_RUNTIME
-        .block_on(
+    // FIXME(ngates): our TUI app should never perform I/O in the render loop...
+    let array = block_in_place(|| {
+        Handle::current().block_on(
             reader
-                .projection_evaluation(&(0..row_count), &root())
-                .vortex_expect("Failed to construct projection")
-                .invoke(MaskFuture::new_true(
-                    usize::try_from(row_count).vortex_expect("row_count overflowed usize"),
-                )),
+                .projection_evaluation(
+                    &(0..row_count),
+                    &root(),
+                    MaskFuture::new_true(
+                        usize::try_from(row_count).vortex_expect("row_count overflowed usize"),
+                    ),
+                )
+                .vortex_expect("Failed to construct projection"),
         )
-        .vortex_expect("Failed to read flat array");
+    })
+    .vortex_expect("Failed to read flat array");
 
     // Show the metadata as JSON. (show count of encoded bytes as well)
     // let metadata_size = array.metadata_bytes().unwrap_or_default().len();
@@ -212,44 +220,71 @@ fn render_children_list(app: &mut AppState, area: Rect, buf: &mut Buffer) {
     let layout = app.cursor.layout();
 
     if layout.nchildren() > 0 {
-        let filter: Vec<bool> = layout
-            .child_names()
-            .map(|name| {
-                if search_filter.is_empty() {
-                    true
-                } else {
-                    name.contains(&search_filter)
-                }
-            })
-            .collect();
+        if search_filter.is_empty() {
+            // No search filter, show all items
+            let list_items = layout
+                .child_names()
+                .map(|name| name.to_string())
+                .collect_vec();
 
-        let list_items: Vec<String> = layout
-            .child_names()
-            .zip(filter.iter())
-            .filter_map(|(name, keep)| keep.then_some(name.to_string()))
-            .collect();
+            app.filter = None;
+            render_child_list_items(app, area, buf, list_items);
+        } else {
+            // Use fuzzy matching to rank and filter results
+            let matcher = SkimMatcherV2::default();
 
-        if !app.search_filter.is_empty() {
+            // Collect scored matches
+            let mut scored_matches = layout
+                .child_names()
+                .enumerate()
+                .filter_map(|(idx, name)| {
+                    matcher
+                        .fuzzy_match(&name, &search_filter)
+                        .map(|score| (idx, name.to_string(), score))
+                })
+                .collect_vec();
+
+            // Sort by score (higher is better)
+            scored_matches.sort_by(|a, b| b.2.cmp(&a.2));
+
+            // Create filter based on fuzzy matches
+            let mut filter = vec![false; layout.nchildren()];
+            let list_items = scored_matches
+                .iter()
+                .map(|(idx, name, _score)| {
+                    filter[*idx] = true;
+                    name.clone()
+                })
+                .collect_vec();
+
             app.filter = Some(filter);
+            render_child_list_items(app, area, buf, list_items);
         }
-
-        let container = Block::new()
-            .title("Child Layouts")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray));
-
-        let inner_area = container.inner(area);
-
-        container.render(area, buf);
-
-        // Render the List view.
-        // TODO: add state so we can scroll
-        StatefulWidget::render(
-            List::new(list_items).highlight_style(Style::default().black().on_white().bold()),
-            inner_area,
-            buf,
-            &mut app.layouts_list_state,
-        );
     }
+}
+
+fn render_child_list_items(
+    app: &mut AppState,
+    area: Rect,
+    buf: &mut Buffer,
+    list_items: Vec<String>,
+) {
+    let container = Block::new()
+        .title("Child Layouts")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let inner_area = container.inner(area);
+
+    container.render(area, buf);
+
+    // Render the List view.
+    // TODO: add state so we can scroll
+    StatefulWidget::render(
+        List::new(list_items).highlight_style(Style::default().black().on_white().bold()),
+        inner_area,
+        buf,
+        &mut app.layouts_list_state,
+    );
 }

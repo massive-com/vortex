@@ -7,13 +7,12 @@ use std::hash::Hash;
 use std::ops::Range;
 
 use arrow_buffer::BooleanBuffer;
-use itertools::Itertools as _;
-use num_traits::{NumCast, ToPrimitive};
-use serde::{Deserialize, Serialize};
+use itertools::Itertools;
 use vortex_buffer::BufferMut;
 use vortex_dtype::Nullability::NonNullable;
 use vortex_dtype::{
-    DType, NativePType, PType, match_each_integer_ptype, match_each_unsigned_integer_ptype,
+    DType, IntegerPType, NativePType, PType, match_each_integer_ptype,
+    match_each_unsigned_integer_ptype,
 };
 use vortex_error::{VortexError, VortexExpect, VortexResult, vortex_bail, vortex_err};
 use vortex_mask::{AllOr, Mask};
@@ -26,7 +25,7 @@ use crate::search_sorted::{SearchResult, SearchSorted, SearchSortedSide};
 use crate::vtable::ValidityHelper;
 use crate::{Array, ArrayRef, IntoArray, ToCanonical};
 
-#[derive(Copy, Clone, Serialize, Deserialize, prost::Message)]
+#[derive(Copy, Clone, prost::Message)]
 pub struct PatchesMetadata {
     #[prost(uint64, tag = "1")]
     len: u64,
@@ -255,40 +254,6 @@ impl Patches {
         )
     }
 
-    /// Return the search_sorted result for the given target re-mapped into the original indices.
-    pub fn search_sorted<T: Into<Scalar>>(
-        &self,
-        target: T,
-        side: SearchSortedSide,
-    ) -> VortexResult<SearchResult> {
-        let target = target.into();
-
-        let sr = if self.values().dtype().is_primitive() {
-            self.values()
-                .as_primitive_typed()
-                .search_sorted(&target.as_primitive().pvalue(), side)
-        } else {
-            self.values().search_sorted(&target, side)
-        };
-
-        let index_idx = sr.to_offsets_index(self.indices().len(), side);
-        let index = usize::try_from(&self.indices().scalar_at(index_idx))? - self.offset;
-        Ok(match sr {
-            // If we reached the end of patched values when searching then the result is one after the last patch index
-            SearchResult::Found(i) => SearchResult::Found(
-                if i == self.indices().len() || side == SearchSortedSide::Right {
-                    index + 1
-                } else {
-                    index
-                },
-            ),
-            // If the result is NotFound we should return index that's one after the nearest not found index for the corresponding value
-            SearchResult::NotFound(i) => {
-                SearchResult::NotFound(if i == 0 { index } else { index + 1 })
-            }
-        })
-    }
-
     /// Returns the minimum patch index
     pub fn min_index(&self) -> usize {
         let first = self
@@ -460,7 +425,7 @@ impl Patches {
         let Some((new_indices, values_indices)) =
             match_each_unsigned_integer_ptype!(indices.ptype(), |Indices| {
                 match_each_integer_ptype!(take_indices.ptype(), |TakeIndices| {
-                    take_search::<_, TakeIndices>(
+                    take_search_inner::<_, TakeIndices>(
                         indices.as_slice::<Indices>(),
                         take_indices,
                         self.offset(),
@@ -529,7 +494,7 @@ impl Patches {
     }
 }
 
-fn take_search<I: NativePType + NumCast + PartialOrd, T: NativePType + NumCast>(
+fn take_search_inner<I: IntegerPType, T: IntegerPType>(
     indices: &[I],
     take_indices: PrimitiveArray,
     indices_offset: usize,
@@ -641,7 +606,7 @@ where
 /// The filter mask may contain indices that are non-patched. The return value of this function
 /// is a new set of `Patches` with the indices relative to the provided `mask` rank, and the
 /// patch values.
-fn filter_patches_with_mask<T: ToPrimitive + Copy + Ord>(
+fn filter_patches_with_mask<T: IntegerPType>(
     patch_indices: &[T],
     offset: usize,
     patch_values: &dyn Array,
@@ -737,7 +702,7 @@ mod test {
 
     use crate::arrays::PrimitiveArray;
     use crate::patches::Patches;
-    use crate::search_sorted::{SearchResult, SearchSortedSide};
+    use crate::search_sorted::SearchResult;
     use crate::validity::Validity;
     use crate::{IntoArray, ToCanonical};
 
@@ -769,84 +734,6 @@ mod test {
             buffer![2u64, 9, 15].into_array(),
             PrimitiveArray::new(buffer![33_i32, 44, 55], Validity::AllValid).into_array(),
         )
-    }
-
-    #[rstest]
-    fn search_larger_than(patches: Patches) {
-        let res = patches.search_sorted(66, SearchSortedSide::Left).unwrap();
-        assert_eq!(res, SearchResult::NotFound(16));
-    }
-
-    #[rstest]
-    fn search_less_than(patches: Patches) {
-        let res = patches.search_sorted(22, SearchSortedSide::Left).unwrap();
-        assert_eq!(res, SearchResult::NotFound(2));
-    }
-
-    #[rstest]
-    fn search_found(patches: Patches) {
-        let res = patches.search_sorted(44, SearchSortedSide::Left).unwrap();
-        assert_eq!(res, SearchResult::Found(9));
-    }
-
-    #[rstest]
-    fn search_not_found_right(patches: Patches) {
-        let res = patches.search_sorted(56, SearchSortedSide::Right).unwrap();
-        assert_eq!(res, SearchResult::NotFound(16));
-    }
-
-    #[rstest]
-    fn search_sliced(patches: Patches) {
-        let sliced = patches.slice(7..20).unwrap();
-        assert_eq!(
-            sliced.search_sorted(22, SearchSortedSide::Left).unwrap(),
-            SearchResult::NotFound(2)
-        );
-    }
-
-    #[test]
-    fn search_right() {
-        let patches = Patches::new(
-            6,
-            0,
-            buffer![0u8, 1, 4, 5].into_array(),
-            buffer![-128i8, -98, 8, 50].into_array(),
-        );
-
-        assert_eq!(
-            patches.search_sorted(-98, SearchSortedSide::Right).unwrap(),
-            SearchResult::Found(2)
-        );
-        assert_eq!(
-            patches.search_sorted(50, SearchSortedSide::Right).unwrap(),
-            SearchResult::Found(6),
-        );
-        assert_eq!(
-            patches.search_sorted(7, SearchSortedSide::Right).unwrap(),
-            SearchResult::NotFound(2),
-        );
-        assert_eq!(
-            patches.search_sorted(51, SearchSortedSide::Right).unwrap(),
-            SearchResult::NotFound(6)
-        );
-    }
-
-    #[test]
-    fn search_left() {
-        let patches = Patches::new(
-            20,
-            0,
-            buffer![0u64, 1, 17, 18, 19].into_array(),
-            buffer![11i32, 22, 33, 44, 55].into_array(),
-        );
-        assert_eq!(
-            patches.search_sorted(30, SearchSortedSide::Left).unwrap(),
-            SearchResult::NotFound(2)
-        );
-        assert_eq!(
-            patches.search_sorted(54, SearchSortedSide::Left).unwrap(),
-            SearchResult::NotFound(19)
-        );
     }
 
     #[rstest]

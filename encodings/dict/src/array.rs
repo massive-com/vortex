@@ -4,12 +4,9 @@
 use std::fmt::Debug;
 
 use arrow_buffer::BooleanBuffer;
-use vortex_array::compute::take;
 use vortex_array::stats::{ArrayStats, StatsSetRef};
-use vortex_array::vtable::{ArrayVTable, CanonicalVTable, NotSupported, VTable, ValidityVTable};
-use vortex_array::{
-    Array, ArrayRef, Canonical, EncodingId, EncodingRef, IntoArray, ToCanonical, vtable,
-};
+use vortex_array::vtable::{ArrayVTable, NotSupported, VTable, ValidityVTable};
+use vortex_array::{Array, ArrayRef, EncodingId, EncodingRef, ToCanonical, vtable};
 use vortex_dtype::{DType, match_each_integer_ptype};
 use vortex_error::{VortexExpect as _, VortexResult, vortex_bail};
 use vortex_mask::{AllOr, Mask};
@@ -44,6 +41,7 @@ pub struct DictArray {
     codes: ArrayRef,
     values: ArrayRef,
     stats_set: ArrayStats,
+    dtype: DType,
 }
 
 #[derive(Clone, Debug)]
@@ -57,10 +55,14 @@ impl DictArray {
     /// by the safe [`DictArray::try_new`] constructor are valid, for example when
     /// you are filtering or slicing an existing valid `DictArray`.
     pub unsafe fn new_unchecked(codes: ArrayRef, values: ArrayRef) -> Self {
+        let dtype = values
+            .dtype()
+            .union_nullability(codes.dtype().nullability());
         Self {
             codes,
             values,
             stats_set: Default::default(),
+            dtype,
         }
     }
 
@@ -88,11 +90,7 @@ impl DictArray {
             vortex_bail!(MismatchedTypes: "unsigned int", codes.dtype());
         }
 
-        Ok(Self {
-            codes,
-            values,
-            stats_set: Default::default(),
-        })
+        Ok(unsafe { Self::new_unchecked(codes, values) })
     }
 
     #[inline]
@@ -112,31 +110,11 @@ impl ArrayVTable<DictVTable> for DictVTable {
     }
 
     fn dtype(array: &DictArray) -> &DType {
-        array.values.dtype()
+        &array.dtype
     }
 
     fn stats(array: &DictArray) -> StatsSetRef<'_> {
         array.stats_set.to_ref(array.as_ref())
-    }
-}
-
-impl CanonicalVTable<DictVTable> for DictVTable {
-    fn canonicalize(array: &DictArray) -> Canonical {
-        match array.dtype() {
-            // NOTE: Utf8 and Binary will decompress into VarBinViewArray, which requires a full
-            // decompression to construct the views child array.
-            // For this case, it is *always* faster to decompress the values first and then create
-            // copies of the view pointers.
-            DType::Utf8(_) | DType::Binary(_) => {
-                let canonical_values: ArrayRef = array.values().to_canonical().into_array();
-                take(&canonical_values, array.codes())
-                    .vortex_expect("taking codes from dictionary values shouldn't fail")
-                    .to_canonical()
-            }
-            _ => take(array.values(), array.codes())
-                .vortex_expect("taking codes from dictionary values shouldn't fail")
-                .to_canonical(),
-        }
     }
 }
 
@@ -206,7 +184,7 @@ mod test {
     use vortex_array::{Array, ArrayRef, IntoArray, ToCanonical};
     use vortex_buffer::buffer;
     use vortex_dtype::Nullability::NonNullable;
-    use vortex_dtype::{DType, NativePType, PType};
+    use vortex_dtype::{DType, NativePType, PType, UnsignedPType};
     use vortex_error::{VortexExpect, VortexUnwrap, vortex_panic};
     use vortex_mask::AllOr;
 
@@ -288,7 +266,7 @@ mod test {
         assert_eq!(indices, [0, 2, 4]);
     }
 
-    fn make_dict_primitive_chunks<T: NativePType, U: NativePType>(
+    fn make_dict_primitive_chunks<T: NativePType, Code: UnsignedPType>(
         len: usize,
         unique_values: usize,
         chunk_count: usize,
@@ -305,7 +283,7 @@ mod test {
                     .collect::<PrimitiveArray>();
                 let codes = (0..len)
                     .map(|_| {
-                        U::from(rng.random_range(0..unique_values)).vortex_expect("valid value")
+                        Code::from(rng.random_range(0..unique_values)).vortex_expect("valid value")
                     })
                     .collect::<PrimitiveArray>();
 

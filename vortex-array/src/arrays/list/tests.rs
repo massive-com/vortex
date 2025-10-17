@@ -4,33 +4,38 @@
 use std::sync::Arc;
 
 use arrow_buffer::BooleanBuffer;
+use vortex_buffer::buffer;
 use vortex_dtype::PType::I32;
 use vortex_dtype::{DType, Nullability};
 use vortex_error::VortexUnwrap;
 use vortex_mask::Mask;
+use vortex_scalar::Scalar;
 
 use super::*;
+use crate::IntoArray;
 use crate::arrays::PrimitiveArray;
+use crate::builders::{ArrayBuilder, ListBuilder};
 use crate::compute::filter;
+use crate::validity::Validity;
 
 #[test]
 fn test_empty_list_array() {
     let elements = PrimitiveArray::empty::<u32>(Nullability::NonNullable);
-    let offsets = PrimitiveArray::from_iter([0]);
+    let offsets = buffer![0].into_array();
     let validity = Validity::AllValid;
 
-    let list = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let list = ListArray::try_new(elements.into_array(), offsets, validity).unwrap();
 
     assert_eq!(0, list.len());
 }
 
 #[test]
 fn test_simple_list_array() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([0, 2, 4, 5]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![0, 2, 4, 5].into_array();
     let validity = Validity::AllValid;
 
-    let list = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let list = ListArray::try_new(elements, offsets, validity).unwrap();
 
     assert_eq!(
         Scalar::list(
@@ -56,11 +61,11 @@ fn test_simple_list_array() {
 
 #[test]
 fn test_simple_list_array_from_iter() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3]);
-    let offsets = PrimitiveArray::from_iter([0, 2, 3]);
+    let elements = buffer![1i32, 2, 3].into_array();
+    let offsets = buffer![0, 2, 3].into_array();
     let validity = Validity::NonNullable;
 
-    let list = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let list = ListArray::try_new(elements, offsets, validity).unwrap();
 
     let list_from_iter =
         ListArray::from_iter_slow::<u32, _>(vec![vec![1i32, 2], vec![3]], Arc::new(I32.into()))
@@ -74,10 +79,10 @@ fn test_simple_list_array_from_iter() {
 #[test]
 fn test_simple_list_filter() {
     let elements = PrimitiveArray::from_option_iter([None, Some(2), Some(3), Some(4), Some(5)]);
-    let offsets = PrimitiveArray::from_iter([0, 2, 4, 5]);
+    let offsets = buffer![0, 2, 4, 5].into_array();
     let validity = Validity::AllValid;
 
-    let list = ListArray::try_new(elements.into_array(), offsets.into_array(), validity)
+    let list = ListArray::try_new(elements.into_array(), offsets, validity)
         .unwrap()
         .into_array();
 
@@ -90,9 +95,265 @@ fn test_simple_list_filter() {
 }
 
 #[test]
+fn test_list_filter_dense_mask() {
+    // Test filtering with a dense mask (high density of true values).
+    let elements = buffer![0..100].into_array();
+    let offsets = buffer![0, 10, 25, 40, 60, 85, 100].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    // Dense mask: keep most elements (indices 1, 2, 3, 4, 5).
+    let mask = Mask::from(BooleanBuffer::from(vec![
+        false, true, true, true, true, true,
+    ]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    // Should have 5 lists remaining.
+    assert_eq!(filtered_list.len(), 5);
+
+    // Verify first remaining list (originally index 1) has correct elements.
+    let first_list = filtered_list.list_elements_at(0);
+    assert_eq!(first_list.len(), 15); // 25 - 10
+    assert_eq!(first_list.scalar_at(0), 10.into());
+    assert_eq!(first_list.scalar_at(14), 24.into());
+}
+
+#[test]
+fn test_list_filter_sparse_mask() {
+    // Test filtering with a sparse mask (low density of true values).
+    let elements = buffer![0..100].into_array();
+    let offsets = buffer![0, 10, 25, 40, 60, 85, 100].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    // Sparse mask: keep only a few elements (indices 0 and 5).
+    let mask = Mask::from(BooleanBuffer::from(vec![
+        true, false, false, false, false, true,
+    ]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    // Should have 2 lists remaining.
+    assert_eq!(filtered_list.len(), 2);
+
+    // Verify first list (originally index 0).
+    let first_list = filtered_list.list_elements_at(0);
+    assert_eq!(first_list.len(), 10);
+    assert_eq!(first_list.scalar_at(0), 0.into());
+    assert_eq!(first_list.scalar_at(9), 9.into());
+
+    // Verify second list (originally index 5).
+    let second_list = filtered_list.list_elements_at(1);
+    assert_eq!(second_list.len(), 15); // 100 - 85
+    assert_eq!(second_list.scalar_at(0), 85.into());
+    assert_eq!(second_list.scalar_at(14), 99.into());
+}
+
+#[test]
+fn test_list_filter_empty_lists() {
+    // Test filtering arrays that contain empty lists.
+    let elements = buffer![0..10].into_array();
+    let offsets = buffer![0, 0, 3, 3, 7, 10, 10].into_array(); // Lists at indices 0, 2, 5 are empty.
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    let mask = Mask::from(BooleanBuffer::from(vec![
+        true, true, true, false, false, true,
+    ]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    assert_eq!(filtered_list.len(), 4);
+
+    // First list is empty.
+    assert_eq!(filtered_list.list_elements_at(0).len(), 0);
+
+    // Second list has 3 elements.
+    let second_list = filtered_list.list_elements_at(1);
+    assert_eq!(second_list.len(), 3);
+    assert_eq!(second_list.scalar_at(0), 0.into());
+
+    // Third list is empty.
+    assert_eq!(filtered_list.list_elements_at(2).len(), 0);
+
+    // Fourth list is empty.
+    assert_eq!(filtered_list.list_elements_at(3).len(), 0);
+}
+
+#[test]
+fn test_list_filter_with_nulls() {
+    // Test filtering lists with null validity.
+    let elements = buffer![0..15].into_array();
+    let offsets = buffer![0, 3, 7, 10, 12, 15].into_array();
+    let validity = Validity::from_mask(
+        Mask::from(BooleanBuffer::from(vec![true, false, true, false, true])),
+        Nullability::Nullable,
+    );
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    let mask = Mask::from(BooleanBuffer::from(vec![true, true, false, true, true]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    assert_eq!(filtered_list.len(), 4);
+
+    // Check validity of filtered array.
+    assert!(filtered_list.scalar_at(0).is_valid());
+    assert!(!filtered_list.scalar_at(1).is_valid()); // Was null.
+    assert!(!filtered_list.scalar_at(2).is_valid()); // Was null.
+    assert!(filtered_list.scalar_at(3).is_valid());
+}
+
+#[test]
+fn test_list_filter_all_true() {
+    // Test filtering with an all-true mask.
+    let elements = buffer![0..20].into_array();
+    let offsets = buffer![0, 5, 10, 15, 20].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    let mask = Mask::AllTrue(4);
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    // All lists should be preserved.
+    assert_eq!(filtered_list.len(), 4);
+
+    // Verify all lists are intact.
+    for i in 0..4i32 {
+        let list_at_i = filtered_list.list_elements_at(i as usize);
+        assert_eq!(list_at_i.len(), 5);
+        assert_eq!(list_at_i.scalar_at(0), (i * 5).into());
+    }
+}
+
+#[test]
+fn test_list_filter_all_false() {
+    // Test filtering with an all-false mask.
+    let elements = buffer![0..20].into_array();
+    let offsets = buffer![0, 5, 10, 15, 20].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    let mask = Mask::AllFalse(4);
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    // No lists should remain.
+    assert_eq!(filtered_list.len(), 0);
+}
+
+#[test]
+fn test_list_filter_single_element() {
+    // Test filtering to keep only one element.
+    let elements = buffer![0..50].into_array();
+    let offsets = buffer![0, 10, 20, 30, 40, 50].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    let mask = Mask::from(BooleanBuffer::from(vec![false, false, true, false, false]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    assert_eq!(filtered_list.len(), 1);
+
+    let single_list = filtered_list.list_elements_at(0);
+    assert_eq!(single_list.len(), 10);
+    assert_eq!(single_list.scalar_at(0), 20.into());
+    assert_eq!(single_list.scalar_at(9), 29.into());
+}
+
+#[test]
+fn test_list_filter_alternating_pattern() {
+    // Test filtering with an alternating pattern.
+    let elements = buffer![0..60].into_array();
+    let offsets = buffer![0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    // Keep every other list.
+    let mask = Mask::from(BooleanBuffer::from(vec![
+        true, false, true, false, true, false, true, false, true, false, true, false,
+    ]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    assert_eq!(filtered_list.len(), 6);
+
+    // Verify that we have the correct lists (0, 2, 4, 6, 8, 10).
+    for (i, expected_start) in [0, 10, 20, 30, 40, 50].iter().enumerate() {
+        let list_at_i = filtered_list.list_elements_at(i);
+        assert_eq!(list_at_i.len(), 5);
+        assert_eq!(list_at_i.scalar_at(0), (*expected_start).into());
+    }
+}
+
+#[test]
+fn test_list_filter_variable_sizes() {
+    // Test filtering lists with highly variable sizes.
+    let elements = buffer![0..100].into_array();
+    let offsets = buffer![0, 1, 2, 5, 10, 20, 35, 60, 100].into_array();
+    let validity = Validity::AllValid;
+
+    let list = ListArray::try_new(elements, offsets, validity)
+        .unwrap()
+        .into_array();
+
+    let mask = Mask::from(BooleanBuffer::from(vec![
+        true, false, true, true, false, true, true, true,
+    ]));
+
+    let filtered = filter(&list, &mask).unwrap();
+    let filtered_list = filtered.as_::<ListVTable>();
+
+    assert_eq!(filtered_list.len(), 6);
+
+    // Verify sizes of filtered lists.
+    assert_eq!(filtered_list.list_elements_at(0).len(), 1); // Size 1
+    assert_eq!(filtered_list.list_elements_at(1).len(), 3); // Size 3
+    assert_eq!(filtered_list.list_elements_at(2).len(), 5); // Size 5
+    assert_eq!(filtered_list.list_elements_at(3).len(), 15); // Size 15
+    assert_eq!(filtered_list.list_elements_at(4).len(), 25); // Size 25
+    assert_eq!(filtered_list.list_elements_at(5).len(), 40); // Size 40
+}
+
+#[test]
 fn test_offset_to_0() {
     let mut builder =
-        ListBuilder::<u32>::with_capacity(Arc::new(I32.into()), Nullability::NonNullable, 5);
+        ListBuilder::<u32>::with_capacity(Arc::new(I32.into()), Nullability::NonNullable, 10, 5);
     builder
         .append_value(
             Scalar::list(
@@ -144,7 +405,7 @@ fn test_offset_to_0() {
         )
         .vortex_unwrap();
     let list = builder.finish().slice(2..4);
-    let list = list.as_::<ListVTable>().reset_offsets().unwrap();
+    let list = list.as_::<ListVTable>().reset_offsets(false).unwrap();
     assert_eq!(list.len(), 2);
     assert_eq!(list.offsets().len(), 3);
     assert_eq!(list.elements().len(), 6);
@@ -302,43 +563,43 @@ fn test_list_of_lists() {
     ));
 
     // Access the first list of lists and verify its contents.
-    let first_outer = list_of_lists.elements_at(0);
+    let first_outer = list_of_lists.list_elements_at(0);
     let first_outer_list = first_outer.as_::<ListVTable>();
     assert_eq!(first_outer_list.len(), 2);
 
     // Check first inner list [1, 2].
-    let first_inner = first_outer_list.elements_at(0);
+    let first_inner = first_outer_list.list_elements_at(0);
     assert_eq!(first_inner.len(), 2);
     assert_eq!(first_inner.scalar_at(0), 1.into());
     assert_eq!(first_inner.scalar_at(1), 2.into());
 
     // Check second inner list [3].
-    let second_inner = first_outer_list.elements_at(1);
+    let second_inner = first_outer_list.list_elements_at(1);
     assert_eq!(second_inner.len(), 1);
     assert_eq!(second_inner.scalar_at(0), 3.into());
 
     // Check the second list of lists [[4, 5, 6]].
-    let second_outer = list_of_lists.elements_at(1);
+    let second_outer = list_of_lists.list_elements_at(1);
     let second_outer_list = second_outer.as_::<ListVTable>();
     assert_eq!(second_outer_list.len(), 1);
 
-    let inner = second_outer_list.elements_at(0);
+    let inner = second_outer_list.list_elements_at(0);
     assert_eq!(inner.len(), 3);
     assert_eq!(inner.scalar_at(0), 4.into());
     assert_eq!(inner.scalar_at(1), 5.into());
     assert_eq!(inner.scalar_at(2), 6.into());
 
     // Check the third list of lists (empty).
-    let third_outer = list_of_lists.elements_at(2);
+    let third_outer = list_of_lists.list_elements_at(2);
     let third_outer_list = third_outer.as_::<ListVTable>();
     assert_eq!(third_outer_list.len(), 0);
 
     // Check the fourth list of lists [[7]].
-    let fourth_outer = list_of_lists.elements_at(3);
+    let fourth_outer = list_of_lists.list_elements_at(3);
     let fourth_outer_list = fourth_outer.as_::<ListVTable>();
     assert_eq!(fourth_outer_list.len(), 1);
 
-    let inner = fourth_outer_list.elements_at(0);
+    let inner = fourth_outer_list.list_elements_at(0);
     assert_eq!(inner.len(), 1);
     assert_eq!(inner.scalar_at(0), 7.into());
 
@@ -354,12 +615,12 @@ fn test_list_of_lists() {
     assert_eq!(sliced_list.len(), 2);
 
     // First element of slice should be [[4, 5, 6]].
-    let first_sliced = sliced_list.elements_at(0);
+    let first_sliced = sliced_list.list_elements_at(0);
     let first_sliced_list = first_sliced.as_::<ListVTable>();
     assert_eq!(first_sliced_list.len(), 1);
 
     // Second element of slice should be empty [].
-    let second_sliced = sliced_list.elements_at(1);
+    let second_sliced = sliced_list.list_elements_at(1);
     let second_sliced_list = second_sliced.as_::<ListVTable>();
     assert_eq!(second_sliced_list.len(), 0);
 }
@@ -396,14 +657,14 @@ fn test_list_of_lists_nullable_outer() {
     assert!(second.is_null());
 
     // Third element should be [[4, 5, 6]].
-    let third = list_of_lists.elements_at(2);
+    let third = list_of_lists.list_elements_at(2);
     let third_list = third.as_::<ListVTable>();
     assert_eq!(third_list.len(), 1);
-    let inner = third_list.elements_at(0);
+    let inner = third_list.list_elements_at(0);
     assert_eq!(inner.len(), 3);
 
     // Fourth element should be [[7]].
-    let fourth = list_of_lists.elements_at(3);
+    let fourth = list_of_lists.list_elements_at(3);
     let fourth_list = fourth.as_::<ListVTable>();
     assert_eq!(fourth_list.len(), 1);
 }
@@ -440,7 +701,7 @@ fn test_list_of_lists_nullable_inner() {
     ));
 
     // First outer list should have 3 inner lists with the second being null.
-    let first_outer = list_of_lists.elements_at(0);
+    let first_outer = list_of_lists.list_elements_at(0);
     let first_list = first_outer.as_::<ListVTable>();
     assert_eq!(first_list.len(), 3);
 
@@ -475,12 +736,12 @@ fn test_list_of_lists_both_nullable() {
     // First outer list should have 2 elements, second is null inner list.
     let first_outer = list_of_lists.scalar_at(0);
     assert!(!first_outer.is_null());
-    let first_outer_array = list_of_lists.elements_at(0);
+    let first_outer_array = list_of_lists.list_elements_at(0);
     let first_list = first_outer_array.as_::<ListVTable>();
     assert_eq!(first_list.len(), 2);
 
     // First inner list should be [1, 2].
-    let first_inner = first_list.elements_at(0);
+    let first_inner = first_list.list_elements_at(0);
     assert_eq!(first_inner.len(), 2);
 
     // Second inner list should be null.
@@ -492,15 +753,15 @@ fn test_list_of_lists_both_nullable() {
     assert!(second_outer.is_null());
 
     // Third outer list should have [3].
-    let third_outer = list_of_lists.elements_at(2);
+    let third_outer = list_of_lists.list_elements_at(2);
     let third_list = third_outer.as_::<ListVTable>();
     assert_eq!(third_list.len(), 1);
-    let inner = third_list.elements_at(0);
+    let inner = third_list.list_elements_at(0);
     assert_eq!(inner.len(), 1);
     assert_eq!(inner.scalar_at(0), 3.into());
 
     // Fourth outer list should have a null inner list.
-    let fourth_outer = list_of_lists.elements_at(3);
+    let fourth_outer = list_of_lists.list_elements_at(3);
     let fourth_list = fourth_outer.as_::<ListVTable>();
     assert_eq!(fourth_list.len(), 1);
     let inner = fourth_list.scalar_at(0);
@@ -510,88 +771,125 @@ fn test_list_of_lists_both_nullable() {
 #[test]
 #[should_panic(expected = "offsets minimum -1 outside valid range")]
 fn test_negative_offset_values() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([-1i32, 2, 4, 5]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![-1i32, 2, 4, 5].into_array();
     let validity = Validity::AllValid;
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets, validity).unwrap();
 }
 
 #[test]
 #[should_panic(expected = "offsets must be sorted")]
 fn test_unsorted_offsets() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([0u32, 3, 2, 5]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![0u32, 3, 2, 5].into_array();
     let validity = Validity::AllValid;
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets, validity).unwrap();
 }
 
 #[test]
 #[should_panic(expected = "Max offset 7 is beyond the length of the elements array 5")]
 fn test_offset_exceeding_elements_length() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([0u32, 2, 4, 7]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![0u32, 2, 4, 7].into_array();
     let validity = Validity::AllValid;
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets, validity).unwrap();
 }
 
 #[test]
 #[should_panic(expected = "validity with size 2 does not match array size 4")]
 fn test_validity_length_mismatch() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([0u32, 2, 4, 5, 5]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![0u32, 2, 4, 5, 5].into_array();
     let validity = Validity::from_mask(
         Mask::from(BooleanBuffer::from(vec![true, false])),
         Nullability::Nullable,
     );
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets, validity).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "Expected offsets to be an non-nullable integer type")]
+#[should_panic(expected = "offsets have invalid type")]
 fn test_nullable_offsets() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
     let offsets = PrimitiveArray::from_option_iter([Some(0u32), Some(2), None, Some(5)]);
     let validity = Validity::AllValid;
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets.into_array(), validity).unwrap();
 }
 
 #[test]
 #[should_panic(expected = "Offsets must have at least one element, [0] for an empty list")]
 fn test_empty_offsets_array() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3]);
+    let elements = buffer![1i32, 2, 3].into_array();
     let offsets = PrimitiveArray::empty::<u32>(Nullability::NonNullable);
     let validity = Validity::AllValid;
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets.into_array(), validity).unwrap();
 }
 
 #[test]
-#[should_panic(
-    expected = "Expected offsets to be an non-nullable integer type, got Primitive(F32, NonNullable)"
-)]
+#[should_panic(expected = "offsets have invalid type")]
 fn test_non_integer_offsets() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([0.0f32, 2.0, 4.0, 5.0]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![0.0f32, 2.0, 4.0, 5.0].into_array();
     let validity = Validity::AllValid;
 
-    let _ = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let _ = ListArray::try_new(elements, offsets, validity).unwrap();
 }
 
 #[test]
 fn test_offsets_constant() {
-    let elements = PrimitiveArray::from_iter([1i32, 2, 3, 4, 5]);
-    let offsets = PrimitiveArray::from_iter([5u32, 5, 5, 5]);
+    let elements = buffer![1i32, 2, 3, 4, 5].into_array();
+    let offsets = buffer![5u32, 5, 5, 5].into_array();
     let validity = Validity::AllValid;
 
     // This should succeed as it represents empty lists
-    let list = ListArray::try_new(elements.into_array(), offsets.into_array(), validity).unwrap();
+    let list = ListArray::try_new(elements, offsets, validity).unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list.elements_at(0).len(), 0);
-    assert_eq!(list.elements_at(1).len(), 0);
-    assert_eq!(list.elements_at(2).len(), 0);
+    assert_eq!(list.list_elements_at(0).len(), 0);
+    assert_eq!(list.list_elements_at(1).len(), 0);
+    assert_eq!(list.list_elements_at(2).len(), 0);
+}
+
+#[test]
+fn test_recursive_compact_list_of_lists() {
+    // Create a nested list structure: [[[1,2,3], [4,5]], [[6,7,8,9]], [[10], [11,12]]]
+    let nested_data = vec![
+        Some(vec![
+            Some(vec![Some(1), Some(2), Some(3)]),
+            Some(vec![Some(4), Some(5)]),
+        ]),
+        Some(vec![Some(vec![Some(6), Some(7), Some(8), Some(9)])]),
+        Some(vec![Some(vec![Some(10)]), Some(vec![Some(11), Some(12)])]),
+    ];
+
+    let original = create_list_of_lists_nullable(nested_data);
+    // Slice to remove prefix - creates wasted space since offsets no longer reference early elements
+    let sliced = original.slice(1..3);
+    let sliced_list = sliced.as_::<ListVTable>();
+
+    // Test non-recursive compaction: only resets outer list offsets
+    let non_recursive = sliced_list.reset_offsets(false).unwrap();
+    // Test recursive compaction: resets offsets and compacts inner canonical arrays
+    let recursive = sliced_list.reset_offsets(true).unwrap();
+
+    assert_eq!(non_recursive.len(), 2);
+    assert_eq!(recursive.len(), 2);
+
+    // Check the flattened elements - this shows the actual compaction difference
+    let non_recursive_flat_elements = non_recursive.elements().as_::<ListVTable>().elements();
+    let recursive_flat_elements = recursive.elements().as_::<ListVTable>().elements();
+
+    // Non-recursive should still have all original elements [1,2,3,4,5,6,7,8,9,10,11,12]
+    assert_eq!(non_recursive_flat_elements.len(), 12);
+
+    // Recursive should only have elements still referenced [6,7,8,9,10,11,12]
+    assert_eq!(recursive_flat_elements.len(), 7);
+
+    // Verify data integrity is preserved
+    assert_eq!(non_recursive.scalar_at(0), recursive.scalar_at(0));
 }

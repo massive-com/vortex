@@ -13,13 +13,18 @@ repository = { workspace = true }
 rust-version = { workspace = true }
 version = { workspace = true }
 
+[package.metadata.docs.rs]
+all-features = true
+
 [lints]
 workspace = true
 
 [dependencies]
 arbitrary = { workspace = true, optional = true }
 arcref = { workspace = true }
+async-trait = { workspace = true }
 dyn-hash = { workspace = true }
+futures = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 paste = { workspace = true }
@@ -37,6 +42,7 @@ vortex-utils = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+divan = { workspace = true }
 insta = { workspace = true }
 rstest = { workspace = true }
 vortex-expr = { path = ".", features = ["test-harness"] }
@@ -47,5 +53,14 @@ arbitrary = [
     "vortex-scalar/arbitrary",
     "vortex-dtype/arbitrary",
 ]
-serde = ["dep:serde", "vortex-dtype/serde", "vortex-error/serde"]
+serde = [
+    "dep:serde",
+    "vortex-dtype/serde",
+    "vortex-error/serde",
+    "vortex-buffer/serde",
+]
 test-harness = []
+
+[[bench]]
+name = "large_struct_pack"
+harness = false

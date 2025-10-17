@@ -13,20 +13,25 @@ repository = { workspace = true }
 rust-version = { workspace = true }
 version = { workspace = true }
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 arrow = ["dep:arrow-buffer"]
-compio = ["dep:compio"]
+cuda = ["dep:cudarc"]
 memmap2 = ["dep:memmap2"]
+serde = ["dep:serde_core"]
 warn-copy = ["dep:log"]
 
 [dependencies]
 arrow-buffer = { workspace = true, optional = true }
 bytes = { workspace = true }
-compio = { workspace = true, optional = true }
+cudarc = { workspace = true, optional = true }
 itertools = { workspace = true }
 log = { workspace = true, optional = true }
 memmap2 = { workspace = true, optional = true }
 num-traits = { workspace = true }
+serde_core = { workspace = true, optional = true }
 simdutf8 = { workspace = true }
 vortex-error = { workspace = true }
 
