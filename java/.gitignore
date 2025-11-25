@@ -6,3 +6,4 @@ build
 
 # generated source directories
 generated_src/
+vortex-spark/bin
