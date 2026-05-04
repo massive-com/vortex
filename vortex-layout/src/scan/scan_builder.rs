@@ -59,6 +59,8 @@ pub struct ScanBuilder<A> {
     /// Whether the scan needs to return splits in the order they appear in the file.
     ordered: bool,
     /// Whether to yield chunks in reverse file order, with rows within each chunk also reversed.
+    ///
+    /// Implies ordered output (chunks are emitted in strict reverse sequence, not interleaved).
     reversed: bool,
     /// Optionally read a subset of the rows in the file.
     row_range: Option<Range<u64>>,
@@ -159,6 +161,8 @@ impl<A: 'static + Send> ScanBuilder<A> {
     /// Reverse the scan order: chunks are yielded last-to-first, and rows within each chunk are
     /// also reversed. This produces a globally reversed row sequence without reading the whole
     /// file first.
+    ///
+    /// Reversed scans always produce ordered output (equivalent to `with_ordered(true)`).
     pub fn with_reversed(mut self, reversed: bool) -> Self {
         self.reversed = reversed;
         self
@@ -304,10 +308,13 @@ impl<A: 'static + Send> ScanBuilder<A> {
                 )?)
             };
 
+        // If reversed, wrap the map_fn to reverse row order within each chunk via a lazy
+        // `DictArray` take. Chunk order reversal is handled by `RepeatedScan::execute`.
         let map_fn = if self.reversed {
             let original = self.map_fn;
             Arc::new(move |array: ArrayRef| {
-                let indices = PrimitiveArray::from_iter((0..array.len() as u64).rev()).into_array();
+                let n = array.len() as u64;
+                let indices = PrimitiveArray::from_iter((0..n).rev()).into_array();
                 original(array.take(indices)?)
             }) as Arc<dyn Fn(ArrayRef) -> VortexResult<A> + Send + Sync>
         } else {
@@ -328,6 +335,7 @@ impl<A: 'static + Send> ScanBuilder<A> {
             map_fn,
             self.limit,
             dtype,
+            self.reversed,
         ))
     }
 

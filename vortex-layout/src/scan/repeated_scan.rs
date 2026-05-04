@@ -40,7 +40,7 @@ pub struct RepeatedScan<A: 'static + Send> {
     projection: Expression,
     filter: Option<Expression>,
     ordered: bool,
-    /// Whether to iterate chunks in reverse order.
+    /// Whether to iterate chunks in reverse order (last chunk first).
     reversed: bool,
     /// Optionally read a subset of the rows in the file.
     row_range: Option<Range<u64>>,
