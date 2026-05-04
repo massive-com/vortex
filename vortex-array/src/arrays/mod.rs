@@ -70,6 +70,10 @@ pub mod primitive;
 pub use primitive::Primitive;
 pub use primitive::PrimitiveArray;
 
+pub mod reversed;
+pub use reversed::Reversed;
+pub use reversed::ReversedArray;
+
 pub mod scalar_fn;
 pub use scalar_fn::ScalarFnArray;
 pub use scalar_fn::ScalarFnVTable;
