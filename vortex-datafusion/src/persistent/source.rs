@@ -289,7 +289,17 @@ impl VortexSource {
         self
     }
 
-    /// Sets a [`SegmentCacheBuilder`] to reuse segment bytes across scans.
+    /// Sets a [`SegmentCacheBuilder`] to reuse segment bytes across scans of the same files.
+    ///
+    /// Without a builder every query re-reads zone map and data segments from object storage.
+    /// The builder is invoked once per opened file with that file's
+    /// [`FileIdentity`](vortex::layout::segments::FileIdentity); the returned per-file
+    /// [`SegmentCache`](vortex::layout::segments::SegmentCache) is wired into the file open
+    /// path. Use
+    /// [`NamespacedMokaSegmentCacheBuilder`](vortex::layout::segments::NamespacedMokaSegmentCacheBuilder)
+    /// for cross-query reuse with a global memory budget, optionally wrapped in
+    /// [`InstrumentedSegmentCacheBuilder`](vortex::layout::segments::InstrumentedSegmentCacheBuilder)
+    /// for hit/miss metrics.
     pub fn with_segment_cache_builder(mut self, builder: Arc<dyn SegmentCacheBuilder>) -> Self {
         self.segment_cache_builder = Some(builder);
         self
