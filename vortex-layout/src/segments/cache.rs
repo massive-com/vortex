@@ -336,3 +336,107 @@ impl SegmentCache for NamespacedMokaSegmentCache {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use vortex_metrics::DefaultMetricsRegistry;
+    use vortex_metrics::MetricValue;
+
+    use super::*;
+
+    fn identity(path: &str, etag: &str) -> FileIdentity {
+        FileIdentity {
+            path: Arc::from(path),
+            version: FileVersion::Etag(Arc::from(etag)),
+        }
+    }
+
+    fn segment(id: u32) -> SegmentId {
+        SegmentId::from(id)
+    }
+
+    fn buf(byte: u8) -> ByteBuffer {
+        ByteBuffer::from(vec![byte])
+    }
+
+    fn counter_value(registry: &dyn MetricsRegistry, name: &str) -> u64 {
+        registry
+            .snapshot()
+            .into_iter()
+            .find(|m| m.name() == name)
+            .map(|m| match m.value() {
+                MetricValue::Counter(c) => c.value(),
+                other => panic!("expected counter for {name}, got {other:?}"),
+            })
+            .unwrap_or_else(|| panic!("metric {name} not registered"))
+    }
+
+    #[tokio::test]
+    async fn namespaced_isolates_files_by_path() -> VortexResult<()> {
+        let builder = NamespacedMokaSegmentCacheBuilder::new(1 << 20);
+
+        let cache_a = builder.cache_for(&identity("a.vortex", "v1"));
+        let cache_b = builder.cache_for(&identity("b.vortex", "v1"));
+
+        cache_a.put(segment(7), buf(0xAA)).await?;
+
+        // Same SegmentId on a different file must NOT see file A's data.
+        assert_eq!(cache_a.get(segment(7)).await?.as_ref(), Some(&buf(0xAA)));
+        assert!(cache_b.get(segment(7)).await?.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn namespaced_treats_version_change_as_new_file() -> VortexResult<()> {
+        let builder = NamespacedMokaSegmentCacheBuilder::new(1 << 20);
+
+        let v1 = builder.cache_for(&identity("a.vortex", "v1"));
+        v1.put(segment(0), buf(0x11)).await?;
+
+        // Same path, different etag — must produce an isolated namespace.
+        let v2 = builder.cache_for(&identity("a.vortex", "v2"));
+        assert!(v2.get(segment(0)).await?.is_none());
+
+        // The original version still sees its own data.
+        assert_eq!(v1.get(segment(0)).await?.as_ref(), Some(&buf(0x11)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn namespaced_reuses_namespace_for_same_identity() -> VortexResult<()> {
+        let builder = NamespacedMokaSegmentCacheBuilder::new(1 << 20);
+        let id = identity("a.vortex", "v1");
+
+        // First open writes; second open must read the same entry back.
+        builder.cache_for(&id).put(segment(3), buf(0x42)).await?;
+        let later = builder.cache_for(&id);
+        assert_eq!(later.get(segment(3)).await?.as_ref(), Some(&buf(0x42)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn instrumented_counts_hits_misses_stores() -> VortexResult<()> {
+        let registry: Arc<dyn MetricsRegistry> = Arc::new(DefaultMetricsRegistry::default());
+        let builder = InstrumentedSegmentCacheBuilder::new(
+            NamespacedMokaSegmentCacheBuilder::new(1 << 20),
+            Arc::clone(&registry),
+            vec![],
+        );
+
+        let cache = builder.cache_for(&identity("a.vortex", "v1"));
+
+        // Miss → put → hit.
+        assert!(cache.get(segment(0)).await?.is_none());
+        cache.put(segment(0), buf(0x01)).await?;
+        assert_eq!(cache.get(segment(0)).await?.as_ref(), Some(&buf(0x01)));
+
+        assert_eq!(counter_value(&*registry, "vortex.file.segments.cache.misses"), 1);
+        assert_eq!(counter_value(&*registry, "vortex.file.segments.cache.stores"), 1);
+        assert_eq!(counter_value(&*registry, "vortex.file.segments.cache.hits"), 1);
+
+        Ok(())
+    }
+}
