@@ -300,10 +300,7 @@ impl VortexSource {
     /// for cross-query reuse with a global memory budget, optionally wrapped in
     /// [`InstrumentedSegmentCacheBuilder`](vortex::layout::segments::InstrumentedSegmentCacheBuilder)
     /// for hit/miss metrics.
-    pub fn with_segment_cache_builder(
-        mut self,
-        builder: Arc<dyn SegmentCacheBuilder>,
-    ) -> Self {
+    pub fn with_segment_cache_builder(mut self, builder: Arc<dyn SegmentCacheBuilder>) -> Self {
         self.segment_cache_builder = Some(builder);
         self
     }
