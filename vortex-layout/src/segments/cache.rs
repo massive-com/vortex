@@ -33,6 +33,11 @@ pub trait SegmentCache: Send + Sync {
 }
 
 /// Shared, type-erased reference to a [`SegmentCache`].
+///
+/// This is the form used at almost every API boundary that hands off a [`SegmentCache`]
+/// (builder outputs, file open options, source adapters). The alias exists primarily so
+/// that IDE "find references" can locate every shared cache hand-off without matching
+/// every `Arc<dyn ...>` in the codebase.
 pub type SharedSegmentCache = Arc<dyn SegmentCache>;
 
 #[async_trait]
@@ -143,6 +148,16 @@ impl<C: SegmentCache> SegmentCache for InstrumentedSegmentCache<C> {
 
 /// Decorator [`SegmentCacheBuilder`] that wraps each per-file cache with an
 /// [`InstrumentedSegmentCache`] for hit/miss/store metrics.
+///
+/// # Example
+///
+/// ```ignore
+/// let cache = Arc::new(InstrumentedSegmentCacheBuilder::new(
+///     NamespacedMokaSegmentCacheBuilder::new(2 << 30),
+///     metrics_registry,
+///     vec![],
+/// ));
+/// ```
 pub struct InstrumentedSegmentCacheBuilder<B> {
     inner: B,
     metrics_registry: Arc<dyn MetricsRegistry>,
@@ -209,28 +224,36 @@ impl SegmentSource for SegmentCacheSourceAdapter {
 ///
 /// Two files compare equal only if both [`path`](FileIdentity::path) and
 /// [`version`](FileIdentity::version) match. An overwrite at the same path produces a new
-/// [`FileVersion`], so old cache entries become unreachable rather than serving stale data.
+/// `FileVersion`, so old cache entries become unreachable rather than serving stale data.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct FileIdentity {
-    /// Logical location of the file.
+    /// Logical location of the file (path, URI, etc.).
     pub path: Arc<str>,
-    /// Content version.
+    /// Content version. Use [`FileVersion::Etag`] when an etag is available; otherwise
+    /// fall back to [`FileVersion::SizeMtime`].
     pub version: FileVersion,
 }
 
 /// A content version for a [`FileIdentity`].
+///
+/// Every file has at least a size and modification time (whether on a local filesystem
+/// or in an object store), so a version is always available. Use [`FileVersion::Etag`]
+/// when the storage layer provides one; it is the most reliable signal of content
+/// change. Use [`FileVersion::SizeMtime`] otherwise.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum FileVersion {
-    /// Content-derived tag from the storage layer.
+    /// Content-derived tag from the storage layer (S3/GCS/Azure etag, etc.).
     Etag(Arc<str>),
-    /// Fallback when no etag is available: file size and modification time.
+    /// Fallback when no etag is available: file size in bytes and modification time
+    /// as a Unix timestamp in seconds.
     SizeMtime(u64, i64),
 }
 
 /// Hands out a per-file [`SegmentCache`] for a given [`FileIdentity`].
 ///
-/// The builder owns shared resources and scopes per-file keys so segment IDs from
-/// different files cannot alias.
+/// This is the user-facing trait for configuring cross-file segment caching. The builder
+/// owns the shared resources (e.g. a global Moka cache) and decides how to scope per-file
+/// keys to avoid collisions between files.
 pub trait SegmentCacheBuilder: Send + Sync {
     /// Return a [`SegmentCache`] scoped to `file`.
     fn cache_for(&self, file: &FileIdentity) -> SharedSegmentCache;
@@ -246,7 +269,12 @@ impl SegmentCacheBuilder for NoOpSegmentCacheBuilder {
 }
 
 /// A [`SegmentCacheBuilder`] backed by a single shared Moka cache, with per-file
-/// namespacing so segment IDs from different files never alias.
+/// namespacing so that segment IDs from different files never alias.
+///
+/// Each unique [`FileIdentity`] is assigned a stable `u32` file ID on first use, and
+/// the underlying Moka cache is keyed on `(file_id, segment_id)`. Cross-query reuse is
+/// enabled for repeated reads of the same file; overwrites change the [`FileVersion`]
+/// and therefore produce a fresh file ID, which is the desired behavior.
 pub struct NamespacedMokaSegmentCacheBuilder {
     inner: Arc<NamespacedMokaInner>,
 }
@@ -291,6 +319,7 @@ impl SegmentCacheBuilder for NamespacedMokaSegmentCacheBuilder {
     }
 }
 
+/// Per-file [`SegmentCache`] view returned by [`NamespacedMokaSegmentCacheBuilder`].
 struct NamespacedMokaSegmentCache {
     file_id: u32,
     cache: Cache<(u32, u32), ByteBuffer, FxBuildHasher>,

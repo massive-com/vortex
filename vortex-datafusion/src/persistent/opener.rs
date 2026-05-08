@@ -59,6 +59,10 @@ use crate::convert::exprs::make_vortex_predicate;
 use crate::convert::schema::calculate_physical_schema;
 use crate::metrics::PARTITION_LABEL;
 use crate::metrics::PATH_LABEL;
+use vortex::layout::segments::FileIdentity;
+use vortex::layout::segments::FileVersion;
+use vortex::layout::segments::SegmentCacheBuilder;
+
 use crate::persistent::cache::CachedVortexMetadata;
 use crate::persistent::reader::VortexReaderFactory;
 use crate::persistent::stream::PrunableStream;
