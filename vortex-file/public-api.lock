@@ -312,7 +312,7 @@ pub fn vortex_file::VortexOpenOptions::with_labels(self, alloc::vec::Vec<vortex_
 
 pub fn vortex_file::VortexOpenOptions::with_metrics_registry(self, alloc::sync::Arc<dyn vortex_metrics::MetricsRegistry>) -> Self
 
-pub fn vortex_file::VortexOpenOptions::with_segment_cache(self, vortex_layout::segments::cache::SharedSegmentCache) -> Self
+pub fn vortex_file::VortexOpenOptions::with_segment_cache(self, segment_cache: vortex_layout::segments::cache::SharedSegmentCache) -> Self
 
 pub fn vortex_file::VortexOpenOptions::with_some_file_size(self, core::option::Option<u64>) -> Self
 

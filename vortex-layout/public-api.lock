@@ -1152,15 +1152,15 @@ impl core::cmp::Eq for vortex_layout::segments::FileVersion
 
 impl core::cmp::PartialEq for vortex_layout::segments::FileVersion
 
-pub fn vortex_layout::segments::FileVersion::eq(&self, &vortex_layout::segments::FileVersion) -> bool
+pub fn vortex_layout::segments::FileVersion::eq(&self, other: &vortex_layout::segments::FileVersion) -> bool
 
 impl core::fmt::Debug for vortex_layout::segments::FileVersion
 
-pub fn vortex_layout::segments::FileVersion::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn vortex_layout::segments::FileVersion::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 
 impl core::hash::Hash for vortex_layout::segments::FileVersion
 
-pub fn vortex_layout::segments::FileVersion::hash<__H: core::hash::Hasher>(&self, &mut __H)
+pub fn vortex_layout::segments::FileVersion::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
 
 impl core::marker::StructuralPartialEq for vortex_layout::segments::FileVersion
 
@@ -1178,15 +1178,15 @@ impl core::cmp::Eq for vortex_layout::segments::FileIdentity
 
 impl core::cmp::PartialEq for vortex_layout::segments::FileIdentity
 
-pub fn vortex_layout::segments::FileIdentity::eq(&self, &vortex_layout::segments::FileIdentity) -> bool
+pub fn vortex_layout::segments::FileIdentity::eq(&self, other: &vortex_layout::segments::FileIdentity) -> bool
 
 impl core::fmt::Debug for vortex_layout::segments::FileIdentity
 
-pub fn vortex_layout::segments::FileIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn vortex_layout::segments::FileIdentity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 
 impl core::hash::Hash for vortex_layout::segments::FileIdentity
 
-pub fn vortex_layout::segments::FileIdentity::hash<__H: core::hash::Hasher>(&self, &mut __H)
+pub fn vortex_layout::segments::FileIdentity::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
 
 impl core::marker::StructuralPartialEq for vortex_layout::segments::FileIdentity
 
@@ -1206,11 +1206,11 @@ pub struct vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>
 
 impl<B: vortex_layout::segments::SegmentCacheBuilder> vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>
 
-pub fn vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>::new(B, alloc::sync::Arc<dyn vortex_metrics::MetricsRegistry>, alloc::vec::Vec<vortex_metrics::Label>) -> Self
+pub fn vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>::new(inner: B, metrics_registry: alloc::sync::Arc<dyn vortex_metrics::MetricsRegistry>, labels: alloc::vec::Vec<vortex_metrics::Label>) -> Self
 
 impl<B: vortex_layout::segments::SegmentCacheBuilder> vortex_layout::segments::SegmentCacheBuilder for vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>
 
-pub fn vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>::cache_for(&self, file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 pub struct vortex_layout::segments::MokaSegmentCache(_)
 
@@ -1228,11 +1228,11 @@ pub struct vortex_layout::segments::NamespacedMokaSegmentCacheBuilder
 
 impl vortex_layout::segments::NamespacedMokaSegmentCacheBuilder
 
-pub fn vortex_layout::segments::NamespacedMokaSegmentCacheBuilder::new(u64) -> Self
+pub fn vortex_layout::segments::NamespacedMokaSegmentCacheBuilder::new(max_capacity_bytes: u64) -> Self
 
 impl vortex_layout::segments::SegmentCacheBuilder for vortex_layout::segments::NamespacedMokaSegmentCacheBuilder
 
-pub fn vortex_layout::segments::NamespacedMokaSegmentCacheBuilder::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::NamespacedMokaSegmentCacheBuilder::cache_for(&self, file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 pub struct vortex_layout::segments::NoOpSegmentCache
 
@@ -1246,13 +1246,13 @@ pub struct vortex_layout::segments::NoOpSegmentCacheBuilder
 
 impl vortex_layout::segments::SegmentCacheBuilder for vortex_layout::segments::NoOpSegmentCacheBuilder
 
-pub fn vortex_layout::segments::NoOpSegmentCacheBuilder::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::NoOpSegmentCacheBuilder::cache_for(&self, _file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 pub struct vortex_layout::segments::SegmentCacheSourceAdapter
 
 impl vortex_layout::segments::SegmentCacheSourceAdapter
 
-pub fn vortex_layout::segments::SegmentCacheSourceAdapter::new(vortex_layout::segments::SharedSegmentCache, alloc::sync::Arc<dyn vortex_layout::segments::SegmentSource>) -> Self
+pub fn vortex_layout::segments::SegmentCacheSourceAdapter::new(cache: vortex_layout::segments::SharedSegmentCache, source: alloc::sync::Arc<dyn vortex_layout::segments::SegmentSource>) -> Self
 
 impl vortex_layout::segments::SegmentSource for vortex_layout::segments::SegmentCacheSourceAdapter
 
@@ -1344,9 +1344,9 @@ pub fn vortex_layout::segments::NoOpSegmentCache::put<'life0, 'async_trait>(&'li
 
 impl<C: vortex_layout::segments::SegmentCache + ?core::marker::Sized> vortex_layout::segments::SegmentCache for alloc::sync::Arc<C>
 
-pub fn alloc::sync::Arc<C>::get<'life0, 'async_trait>(&'life0 self, vortex_layout::segments::SegmentId) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = vortex_error::VortexResult<core::option::Option<vortex_buffer::ByteBuffer>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub fn alloc::sync::Arc<C>::get<'life0, 'async_trait>(&'life0 self, id: vortex_layout::segments::SegmentId) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = vortex_error::VortexResult<core::option::Option<vortex_buffer::ByteBuffer>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
 
-pub fn alloc::sync::Arc<C>::put<'life0, 'async_trait>(&'life0 self, vortex_layout::segments::SegmentId, vortex_buffer::ByteBuffer) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = vortex_error::VortexResult<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub fn alloc::sync::Arc<C>::put<'life0, 'async_trait>(&'life0 self, id: vortex_layout::segments::SegmentId, buffer: vortex_buffer::ByteBuffer) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = vortex_error::VortexResult<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
 
 impl<C: vortex_layout::segments::SegmentCache> vortex_layout::segments::SegmentCache for vortex_layout::segments::InstrumentedSegmentCache<C>
 
@@ -1356,19 +1356,19 @@ pub fn vortex_layout::segments::InstrumentedSegmentCache<C>::put<'life0, 'async_
 
 pub trait vortex_layout::segments::SegmentCacheBuilder: core::marker::Send + core::marker::Sync
 
-pub fn vortex_layout::segments::SegmentCacheBuilder::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::SegmentCacheBuilder::cache_for(&self, file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 impl vortex_layout::segments::SegmentCacheBuilder for vortex_layout::segments::NamespacedMokaSegmentCacheBuilder
 
-pub fn vortex_layout::segments::NamespacedMokaSegmentCacheBuilder::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::NamespacedMokaSegmentCacheBuilder::cache_for(&self, file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 impl vortex_layout::segments::SegmentCacheBuilder for vortex_layout::segments::NoOpSegmentCacheBuilder
 
-pub fn vortex_layout::segments::NoOpSegmentCacheBuilder::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::NoOpSegmentCacheBuilder::cache_for(&self, _file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 impl<B: vortex_layout::segments::SegmentCacheBuilder> vortex_layout::segments::SegmentCacheBuilder for vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>
 
-pub fn vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>::cache_for(&self, &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
+pub fn vortex_layout::segments::InstrumentedSegmentCacheBuilder<B>::cache_for(&self, file: &vortex_layout::segments::FileIdentity) -> vortex_layout::segments::SharedSegmentCache
 
 pub trait vortex_layout::segments::SegmentSink: core::marker::Send + core::marker::Sync
 
