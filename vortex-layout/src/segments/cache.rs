@@ -433,9 +433,18 @@ mod tests {
         cache.put(segment(0), buf(0x01)).await?;
         assert_eq!(cache.get(segment(0)).await?.as_ref(), Some(&buf(0x01)));
 
-        assert_eq!(counter_value(&*registry, "vortex.file.segments.cache.misses"), 1);
-        assert_eq!(counter_value(&*registry, "vortex.file.segments.cache.stores"), 1);
-        assert_eq!(counter_value(&*registry, "vortex.file.segments.cache.hits"), 1);
+        assert_eq!(
+            counter_value(&*registry, "vortex.file.segments.cache.misses"),
+            1
+        );
+        assert_eq!(
+            counter_value(&*registry, "vortex.file.segments.cache.stores"),
+            1
+        );
+        assert_eq!(
+            counter_value(&*registry, "vortex.file.segments.cache.hits"),
+            1
+        );
 
         Ok(())
     }

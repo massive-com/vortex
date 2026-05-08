@@ -30,22 +30,19 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::stream;
-use itertools::Itertools;
 use object_store::ObjectMeta;
 use object_store::path::Path;
 use tracing::Instrument;
 use vortex::array::ArrayRef;
 use vortex::array::VortexSessionExecute;
 use vortex::array::arrow::ArrowArrayExecutor;
-use vortex::dtype::FieldMask;
 use vortex::error::VortexError;
 use vortex::file::OpenOptionsSessionExt;
 use vortex::io::InstrumentedReadAt;
 use vortex::layout::LayoutReader;
-use vortex::layout::segments::SegmentCache;
 use vortex::metrics::Label;
 use vortex::metrics::MetricsRegistry;
-use vortex::scan::{ScanBuilder, SplitBy};
+use vortex::scan::ScanBuilder;
 use vortex::session::VortexSession;
 use vortex_utils::aliases::dash_map::DashMap;
 use vortex_utils::aliases::dash_map::Entry;
@@ -438,40 +435,6 @@ fn file_identity(meta: &ObjectMeta) -> FileIdentity {
         FileVersion::SizeMtime(meta.size, meta.last_modified.timestamp())
     };
     FileIdentity { path, version }
-}
-
-fn natural_split_ranges_for_file(
-    natural_split_ranges: &DashMap<Path, Arc<[Range<u64>]>>,
-    path: &Path,
-    layout_reader: &Arc<dyn LayoutReader>,
-) -> DFResult<Arc<[Range<u64>]>> {
-    if let Some(split_ranges) = natural_split_ranges.get(path) {
-        return Ok(Arc::clone(split_ranges.value()));
-    }
-
-    let split_ranges = compute_natural_split_ranges(layout_reader.as_ref())?;
-
-    match natural_split_ranges.entry(path.clone()) {
-        Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
-        Entry::Vacant(entry) => {
-            entry.insert(Arc::clone(&split_ranges));
-            Ok(split_ranges)
-        }
-    }
-}
-
-fn compute_natural_split_ranges(layout_reader: &dyn LayoutReader) -> DFResult<Arc<[Range<u64>]>> {
-    let row_count = layout_reader.row_count();
-    let row_range = 0..row_count;
-    let split_points: Vec<_> = SplitBy::Layout
-        .splits(layout_reader, &row_range, &[FieldMask::All])
-        .map_err(|e| exec_datafusion_err!("Failed to compute Vortex natural splits: {e}"))?
-        .into_iter()
-        .tuple_windows()
-        .map(|(s, e)| s..e)
-        .collect::<Vec<_>>();
-
-    Ok(split_points.into())
 }
 
 /// If the file has a [`FileRange`], we translate it into a row range in the file for the scan.

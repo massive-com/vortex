@@ -8,7 +8,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 pub(crate) mod arrays;
@@ -31,9 +30,6 @@ mod scan;
 mod serde;
 mod store;
 
-use log::LevelFilter;
-use pyo3_log::Caching;
-use pyo3_log::Logger;
 use tokio::runtime::Runtime;
 use vortex::VortexSessionDefault;
 use vortex::error::VortexError;
