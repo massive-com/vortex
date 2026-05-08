@@ -30,6 +30,7 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::stream;
 use itertools::Itertools;
+use object_store::ObjectMeta;
 use object_store::path::Path;
 use tracing::Instrument;
 use vortex::array::VortexSessionExecute;
@@ -42,7 +43,6 @@ use vortex::io::InstrumentedReadAt;
 use vortex::layout::LayoutReader;
 use vortex::layout::scan::scan_builder::ScanBuilder;
 use vortex::layout::scan::split_by::SplitBy;
-use vortex::layout::segments::SegmentCache;
 use vortex::metrics::Label;
 use vortex::metrics::MetricsRegistry;
 use vortex::session::VortexSession;
@@ -56,6 +56,10 @@ use crate::convert::exprs::make_vortex_predicate;
 use crate::convert::schema::calculate_physical_schema;
 use crate::metrics::PARTITION_LABEL;
 use crate::metrics::PATH_LABEL;
+use vortex::layout::segments::FileIdentity;
+use vortex::layout::segments::FileVersion;
+use vortex::layout::segments::SegmentCacheBuilder;
+
 use crate::persistent::cache::CachedVortexMetadata;
 use crate::persistent::reader::VortexReaderFactory;
 use crate::persistent::stream::PrunableStream;
@@ -98,7 +102,7 @@ pub(crate) struct VortexOpener {
 
     pub expression_convertor: Arc<dyn ExpressionConvertor>,
     pub file_metadata_cache: Option<Arc<dyn FileMetadataCache>>,
-    pub segment_cache: Option<Arc<dyn SegmentCache>>,
+    pub segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     pub projection_pushdown: bool,
     pub scan_concurrency: Option<usize>,
@@ -124,7 +128,7 @@ impl FileOpener for VortexOpener {
         let file_pruning_predicate = self.file_pruning_predicate.clone();
         let expr_adapter_factory = Arc::clone(&self.expr_adapter_factory);
         let file_metadata_cache = self.file_metadata_cache.clone();
-        let segment_cache = self.segment_cache.clone();
+        let segment_cache_builder = self.segment_cache_builder.clone();
 
         let unified_file_schema = Arc::clone(self.table_schema.file_schema());
         let batch_size = self.batch_size;
@@ -203,8 +207,9 @@ impl FileOpener for VortexOpener {
                 open_opts = open_opts.with_footer(vortex_metadata.footer().clone());
             }
 
-            if let Some(segment_cache) = segment_cache {
-                open_opts = open_opts.with_segment_cache(segment_cache);
+            if let Some(builder) = segment_cache_builder {
+                let identity = file_identity(&file.object_meta);
+                open_opts = open_opts.with_segment_cache(builder.cache_for(&identity));
             }
 
             let vxf = open_opts
@@ -452,6 +457,18 @@ impl FileOpener for VortexOpener {
     }
 }
 
+/// Build a [`FileIdentity`] from object store metadata, preferring the etag and falling
+/// back to `(size, last_modified)` when no etag is available.
+fn file_identity(meta: &ObjectMeta) -> FileIdentity {
+    let path = Arc::from(meta.location.as_ref());
+    let version = if let Some(etag) = meta.e_tag.as_deref() {
+        FileVersion::Etag(Arc::from(etag))
+    } else {
+        FileVersion::SizeMtime(meta.size, meta.last_modified.timestamp())
+    };
+    FileIdentity { path, version }
+}
+
 fn natural_split_ranges_for_file(
     natural_split_ranges: &DashMap<Path, Arc<[Range<u64>]>>,
     path: &Path,
@@ -687,7 +704,7 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
         }
@@ -820,7 +837,7 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
         };
@@ -908,7 +925,7 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
         };
@@ -1066,7 +1083,7 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
         };
@@ -1127,7 +1144,7 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
         }
@@ -1332,7 +1349,7 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
         };
