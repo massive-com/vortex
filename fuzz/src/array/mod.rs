@@ -59,7 +59,7 @@ use vortex_array::scalar_fn::fns::operators::Operator;
 use vortex_array::search_sorted::SearchResult;
 use vortex_array::search_sorted::SearchSorted;
 use vortex_array::search_sorted::SearchSortedSide;
-use vortex_btrblocks::BtrBlocksCompressor;
+use vortex_btrblocks::{BtrBlocksCompressor, BtrBlocksCompressorBuilder, FloatCode, IntCode, StringCode};
 use vortex_error::VortexExpect;
 use vortex_error::vortex_panic;
 use vortex_mask::Mask;
