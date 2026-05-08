@@ -29,7 +29,7 @@ use object_store::path::Path;
 use vortex::error::VortexExpect;
 use vortex::file::VORTEX_FILE_EXTENSION;
 use vortex::layout::LayoutReader;
-use vortex::layout::segments::SegmentCache;
+use vortex::layout::segments::SegmentCacheBuilder;
 use vortex::metrics::DefaultMetricsRegistry;
 use vortex::metrics::MetricsRegistry;
 use vortex::session::VortexSession;
@@ -66,7 +66,7 @@ pub struct VortexSource {
     pub(crate) vortex_reader_factory: Option<Arc<dyn VortexReaderFactory>>,
     vx_metrics_registry: Arc<dyn MetricsRegistry>,
     file_metadata_cache: Option<Arc<dyn FileMetadataCache>>,
-    segment_cache: Option<Arc<dyn SegmentCache>>,
+    segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     options: VortexTableOptions,
 }
@@ -94,7 +94,7 @@ impl VortexSource {
             vortex_reader_factory: None,
             vx_metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             file_metadata_cache: None,
-            segment_cache: None,
+            segment_cache_builder: None,
             options: VortexTableOptions::default(),
         }
     }
@@ -139,13 +139,22 @@ impl VortexSource {
         self
     }
 
-    /// Sets a [`SegmentCache`] to reuse decoded segment bytes across scans of the same file.
+    /// Sets a [`SegmentCacheBuilder`] to reuse segment bytes across scans of the same files.
     ///
-    /// Without a cache every query re-reads zone map and data segments from object storage.
-    /// Providing a shared [`MokaSegmentCache`](vortex::layout::segments::MokaSegmentCache)
-    /// eliminates those redundant reads for repeated queries on the same files.
-    pub fn with_segment_cache(mut self, segment_cache: Arc<dyn SegmentCache>) -> Self {
-        self.segment_cache = Some(segment_cache);
+    /// Without a builder every query re-reads zone map and data segments from object storage.
+    /// The builder is invoked once per opened file with that file's
+    /// [`FileIdentity`](vortex::layout::segments::FileIdentity); the returned per-file
+    /// [`SegmentCache`](vortex::layout::segments::SegmentCache) is wired into the file open
+    /// path. Use
+    /// [`NamespacedMokaSegmentCacheBuilder`](vortex::layout::segments::NamespacedMokaSegmentCacheBuilder)
+    /// for cross-query reuse with a global memory budget, optionally wrapped in
+    /// [`InstrumentedSegmentCacheBuilder`](vortex::layout::segments::InstrumentedSegmentCacheBuilder)
+    /// for hit/miss metrics.
+    pub fn with_segment_cache_builder(
+        mut self,
+        builder: Arc<dyn SegmentCacheBuilder>,
+    ) -> Self {
+        self.segment_cache_builder = Some(builder);
         self
     }
 
@@ -206,7 +215,7 @@ impl FileSource for VortexSource {
             has_output_ordering: !base_config.output_ordering.is_empty(),
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: self.file_metadata_cache.clone(),
-            segment_cache: self.segment_cache.clone(),
+            segment_cache_builder: self.segment_cache_builder.clone(),
             projection_pushdown: self.options.projection_pushdown,
             scan_concurrency: self.options.scan_concurrency,
         };
