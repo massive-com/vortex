@@ -96,6 +96,7 @@ impl VortexOpenOptions {
     /// at the layer that opens files, and pass the per-file [`SegmentCache`] it returns
     /// here.
     ///
+    /// [`SegmentCache`]: vortex_layout::segments::SegmentCache
     /// [`SegmentId`]: vortex_layout::segments::SegmentId
     /// [`SegmentCacheBuilder`]: vortex_layout::segments::SegmentCacheBuilder
     pub fn with_segment_cache(mut self, segment_cache: SharedSegmentCache) -> Self {
