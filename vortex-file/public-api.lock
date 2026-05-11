@@ -42,7 +42,7 @@ pub fn vortex_file::segments::FileSegmentSource::request(&self, id: vortex_layou
 
 pub struct vortex_file::segments::InitialReadSegmentCache
 
-pub vortex_file::segments::InitialReadSegmentCache::fallback: alloc::sync::Arc<dyn vortex_layout::segments::cache::SegmentCache>
+pub vortex_file::segments::InitialReadSegmentCache::fallback: vortex_layout::segments::cache::SharedSegmentCache
 
 pub vortex_file::segments::InitialReadSegmentCache::initial: parking_lot::rwlock::RwLock<vortex_utils::aliases::hash_map::HashMap<vortex_layout::segments::SegmentId, vortex_buffer::ByteBuffer>>
 
@@ -310,7 +310,7 @@ pub fn vortex_file::VortexOpenOptions::with_labels(self, labels: alloc::vec::Vec
 
 pub fn vortex_file::VortexOpenOptions::with_metrics_registry(self, metrics: alloc::sync::Arc<dyn vortex_metrics::MetricsRegistry>) -> Self
 
-pub fn vortex_file::VortexOpenOptions::with_segment_cache(self, segment_cache: alloc::sync::Arc<dyn vortex_layout::segments::cache::SegmentCache>) -> Self
+pub fn vortex_file::VortexOpenOptions::with_segment_cache(self, segment_cache: vortex_layout::segments::cache::SharedSegmentCache) -> Self
 
 pub fn vortex_file::VortexOpenOptions::with_some_file_size(self, file_size: core::option::Option<u64>) -> Self
 

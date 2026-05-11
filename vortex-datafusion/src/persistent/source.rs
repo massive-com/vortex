@@ -29,6 +29,7 @@ use object_store::path::Path;
 use vortex::error::VortexExpect;
 use vortex::file::VORTEX_FILE_EXTENSION;
 use vortex::layout::LayoutReader;
+use vortex::layout::segments::SegmentCacheBuilder;
 use vortex::metrics::DefaultMetricsRegistry;
 use vortex::metrics::MetricsRegistry;
 use vortex::session::VortexSession;
@@ -65,6 +66,7 @@ pub struct VortexSource {
     pub(crate) vortex_reader_factory: Option<Arc<dyn VortexReaderFactory>>,
     vx_metrics_registry: Arc<dyn MetricsRegistry>,
     file_metadata_cache: Option<Arc<dyn FileMetadataCache>>,
+    segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     options: VortexTableOptions,
 }
@@ -92,6 +94,7 @@ impl VortexSource {
             vortex_reader_factory: None,
             vx_metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             options: VortexTableOptions::default(),
         }
     }
@@ -136,7 +139,25 @@ impl VortexSource {
         self
     }
 
-    /// Set the underlying scan concurrency. This limit is used per Vortex scan operations.
+    /// Sets a [`SegmentCacheBuilder`] to reuse segment bytes across scans of the same files.
+    ///
+    /// Without a builder every query re-reads zone map and data segments from object storage.
+    /// The builder is invoked once per opened file with that file's
+    /// [`FileIdentity`](vortex::layout::segments::FileIdentity); the returned per-file
+    /// [`SegmentCache`](vortex::layout::segments::SegmentCache) is wired into the file open
+    /// path. Use
+    /// [`NamespacedMokaSegmentCacheBuilder`](vortex::layout::segments::NamespacedMokaSegmentCacheBuilder)
+    /// for cross-query reuse with a global memory budget, optionally wrapped in
+    /// [`InstrumentedSegmentCacheBuilder`](vortex::layout::segments::InstrumentedSegmentCacheBuilder)
+    /// for hit/miss metrics.
+    pub fn with_segment_cache_builder(mut self, builder: Arc<dyn SegmentCacheBuilder>) -> Self {
+        self.segment_cache_builder = Some(builder);
+        self
+    }
+
+    /// Sets the per-file Vortex scan concurrency.
+    ///
+    /// This is separate from DataFusion's partition-level parallelism.
     pub fn with_scan_concurrency(mut self, scan_concurrency: usize) -> Self {
         self.options.scan_concurrency = Some(scan_concurrency);
         self
@@ -191,6 +212,7 @@ impl FileSource for VortexSource {
             has_output_ordering: !base_config.output_ordering.is_empty(),
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: self.file_metadata_cache.clone(),
+            segment_cache_builder: self.segment_cache_builder.clone(),
             projection_pushdown: self.options.projection_pushdown,
             scan_concurrency: self.options.scan_concurrency,
         };
