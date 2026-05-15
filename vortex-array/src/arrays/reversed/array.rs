@@ -5,9 +5,9 @@ use vortex_error::VortexExpect as _;
 use vortex_error::VortexResult;
 use vortex_error::vortex_ensure;
 
-use crate::{ArrayRef, DynArray};
 use crate::dtype::DType;
 use crate::stats::ArrayStats;
+use crate::{ArrayRef, DynArray};
 
 #[derive(Clone, Debug)]
 pub struct ReversedArray {
