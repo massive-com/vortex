@@ -323,7 +323,6 @@ impl VortexSource {
         self.options = opts;
         self
     }
-
     /// Whether the scan will yield rows in reverse file order.
     pub fn reversed(&self) -> bool {
         self.reversed

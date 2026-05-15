@@ -1,136 +1,172 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::sync::Arc;
+
 use vortex_error::VortexExpect as _;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_panic;
 use vortex_session::VortexSession;
-use vortex_session::registry::CachedId;
 
-use crate::AnyCanonical;
 use crate::ArrayRef;
-use crate::array::Array;
-use crate::array::ArrayId;
-use crate::array::ArrayView;
-use crate::array::EmptyArrayData;
-use crate::array::OperationsVTable;
-use crate::array::VTable;
-use crate::array::ValidityVTable;
-use crate::arrays::reversed::ReversedArrayExt as _;
-use crate::arrays::reversed::array::{CHILD_SLOT, SLOT_NAMES};
+use crate::EmptyMetadata;
+use crate::Precision;
+use crate::arrays::reversed::array::ReversedArray;
 use crate::arrays::reversed::execute::reverse_canonical;
 use crate::arrays::reversed::rules::PARENT_RULES;
 use crate::buffer::BufferHandle;
 use crate::dtype::DType;
 use crate::executor::ExecutionCtx;
 use crate::executor::ExecutionResult;
-use crate::require_child;
+use crate::hash::ArrayEq;
+use crate::hash::ArrayHash;
 use crate::scalar::Scalar;
 use crate::serde::ArrayChildren;
+use crate::stats::StatsSetRef;
 use crate::validity::Validity;
+use crate::vtable;
+use crate::vtable::ArrayId;
+use crate::vtable::OperationsVTable;
+use crate::vtable::VTable;
+use crate::vtable::ValidityVTable;
 
-/// A [`Reversed`]-encoded Vortex array.
-///
-/// A lazy wrapper that yields the elements of the inner array in reverse order.
-/// The reversal is applied at execution time via [`reverse_canonical`].
-///
-/// Use [`ArrayRef::reverse`] to construct one; the optimizer is applied immediately
-/// and may eliminate the wrapper for well-known encodings.
-pub type ReversedArray = Array<Reversed>;
+vtable!(Reversed);
 
 /// Encoding tag for [`ReversedArray`].
 #[derive(Clone, Debug)]
 pub struct Reversed;
 
+impl Reversed {
+    pub const ID: ArrayId = ArrayId::new_ref("vortex.reversed");
+}
+
 impl VTable for Reversed {
-    type ArrayData = EmptyArrayData;
+    type Array = ReversedArray;
+    type Metadata = EmptyMetadata;
     type OperationsVTable = Self;
     type ValidityVTable = Self;
 
+    fn vtable(_array: &Self::Array) -> &Self {
+        &Reversed
+    }
+
     fn id(&self) -> ArrayId {
-        static ID: CachedId = CachedId::new("vortex.reversed");
-        *ID
+        Self::ID
     }
 
-    fn validate(
-        &self,
-        _data: &EmptyArrayData,
-        dtype: &DType,
-        len: usize,
-        slots: &[Option<ArrayRef>],
-    ) -> VortexResult<()> {
-        vortex_ensure!(
-            slots[CHILD_SLOT].is_some(),
-            "ReversedArray child slot must be present"
-        );
-        let child = slots[CHILD_SLOT]
-            .as_ref()
-            .vortex_expect("validated child slot");
-        vortex_ensure!(
-            child.dtype() == dtype,
-            "ReversedArray dtype {} does not match child dtype {}",
-            dtype,
-            child.dtype(),
-        );
-        vortex_ensure!(
-            child.len() == len,
-            "ReversedArray length {} does not match child length {}",
-            len,
-            child.len(),
-        );
-        Ok(())
+    fn len(array: &ReversedArray) -> usize {
+        array.len
     }
 
-    fn nbuffers(_array: ArrayView<'_, Self>) -> usize {
+    fn dtype(array: &ReversedArray) -> &DType {
+        &array.dtype
+    }
+
+    fn stats(array: &ReversedArray) -> StatsSetRef<'_> {
+        array.stats.to_ref(array.as_ref())
+    }
+
+    fn array_hash<H: Hasher>(array: &ReversedArray, state: &mut H, precision: Precision) {
+        array.dtype.hash(state);
+        array.len.hash(state);
+        array.child.array_hash(state, precision);
+    }
+
+    fn array_eq(array: &ReversedArray, other: &ReversedArray, precision: Precision) -> bool {
+        array.dtype == other.dtype
+            && array.len == other.len
+            && array.child.array_eq(&other.child, precision)
+    }
+
+    fn nbuffers(_array: &ReversedArray) -> usize {
         0
     }
 
-    fn buffer(_array: ArrayView<'_, Self>, idx: usize) -> BufferHandle {
+    fn buffer(_array: &ReversedArray, idx: usize) -> BufferHandle {
         vortex_panic!("ReversedArray has no buffers (index {idx})")
     }
 
-    fn buffer_name(_array: ArrayView<'_, Self>, _idx: usize) -> Option<String> {
+    fn buffer_name(_array: &ReversedArray, _idx: usize) -> Option<String> {
         None
     }
 
-    fn slot_name(_array: ArrayView<'_, Self>, idx: usize) -> String {
-        SLOT_NAMES
-            .get(idx)
-            .copied()
-            .unwrap_or_else(|| vortex_panic!("ReversedArray slot index {idx} out of bounds"))
-            .to_string()
+    fn nchildren(_array: &ReversedArray) -> usize {
+        1
     }
 
-    fn serialize(
-        _array: ArrayView<'_, Self>,
-        _session: &VortexSession,
-    ) -> VortexResult<Option<Vec<u8>>> {
+    fn child(array: &ReversedArray, idx: usize) -> ArrayRef {
+        match idx {
+            0 => array.child.clone(),
+            _ => vortex_panic!("ReversedArray child index {idx} out of bounds"),
+        }
+    }
+
+    fn child_name(_array: &ReversedArray, idx: usize) -> String {
+        match idx {
+            0 => "child".to_string(),
+            _ => vortex_panic!("ReversedArray child_name index {idx} out of bounds"),
+        }
+    }
+
+    fn metadata(_array: &ReversedArray) -> VortexResult<Self::Metadata> {
+        Ok(EmptyMetadata)
+    }
+
+    fn serialize(_metadata: Self::Metadata) -> VortexResult<Option<Vec<u8>>> {
         vortex_bail!("ReversedArray is not serializable")
     }
 
     fn deserialize(
-        &self,
+        _bytes: &[u8],
         _dtype: &DType,
         _len: usize,
-        _metadata: &[u8],
         _buffers: &[BufferHandle],
-        _children: &dyn ArrayChildren,
         _session: &VortexSession,
-    ) -> VortexResult<crate::array::ArrayParts<Self>> {
+    ) -> VortexResult<Self::Metadata> {
         vortex_bail!("ReversedArray is not serializable")
     }
 
-    fn execute(array: Array<Self>, ctx: &mut ExecutionCtx) -> VortexResult<ExecutionResult> {
-        // Ensure the child is in canonical form before reversing.
-        let array = require_child!(array, array.child(), CHILD_SLOT => AnyCanonical);
-        debug_assert!(array.child().is_canonical());
-        reverse_canonical(array.child(), ctx).map(ExecutionResult::done)
+    fn build(
+        dtype: &DType,
+        len: usize,
+        _metadata: &Self::Metadata,
+        _buffers: &[BufferHandle],
+        children: &dyn ArrayChildren,
+    ) -> VortexResult<ReversedArray> {
+        vortex_ensure!(
+            children.len() == 1,
+            "ReversedArray expects exactly 1 child, got {}",
+            children.len()
+        );
+        let child = children.get(0, dtype, len)?;
+        ReversedArray::try_new(child)
+    }
+
+    fn with_children(array: &mut Self::Array, children: Vec<ArrayRef>) -> VortexResult<()> {
+        vortex_ensure!(
+            children.len() == 1,
+            "ReversedArray expects exactly 1 child, got {}",
+            children.len()
+        );
+        let child = children
+            .into_iter()
+            .next()
+            .vortex_expect("children length already validated");
+        ReversedArray::validate(&child, &array.dtype, array.len)?;
+        array.child = child;
+        Ok(())
+    }
+
+    fn execute(array: Arc<Self::Array>, ctx: &mut ExecutionCtx) -> VortexResult<ExecutionResult> {
+        reverse_canonical(&array.child, ctx).map(ExecutionResult::done)
     }
 
     fn reduce_parent(
-        array: ArrayView<'_, Self>,
+        array: &Self::Array,
         parent: &ArrayRef,
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
@@ -139,19 +175,15 @@ impl VTable for Reversed {
 }
 
 impl OperationsVTable<Reversed> for Reversed {
-    fn scalar_at(
-        array: ArrayView<'_, Reversed>,
-        index: usize,
-        ctx: &mut ExecutionCtx,
-    ) -> VortexResult<Scalar> {
-        let reversed_index = array.len() - 1 - index;
-        array.child().execute_scalar(reversed_index, ctx)
+    fn scalar_at(array: &ReversedArray, index: usize) -> VortexResult<Scalar> {
+        let reversed_index = array.len - 1 - index;
+        array.child.scalar_at(reversed_index)
     }
 }
 
 impl ValidityVTable<Reversed> for Reversed {
-    fn validity(array: ArrayView<'_, Reversed>) -> VortexResult<Validity> {
-        let inner = array.child().validity()?;
+    fn validity(array: &ReversedArray) -> VortexResult<Validity> {
+        let inner = array.child.validity()?;
         match inner {
             Validity::NonNullable => Ok(Validity::NonNullable),
             Validity::AllValid => Ok(Validity::AllValid),
