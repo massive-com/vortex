@@ -41,6 +41,10 @@ impl ReversedArray {
     ///
     /// Caller must ensure `child` is a valid array.
     pub unsafe fn new_unchecked(child: ArrayRef) -> Self {
+        #[cfg(debug_assertions)]
+        Self::validate(&child, child.dtype(), child.len())
+            .vortex_expect("[Debug Assertion]: Invalid `ReversedArray` parameter");
+
         let dtype = child.dtype().clone();
         let len = child.len();
         Self {
