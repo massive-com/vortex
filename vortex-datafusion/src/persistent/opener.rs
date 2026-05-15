@@ -102,6 +102,8 @@ pub(crate) struct VortexOpener {
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     pub projection_pushdown: bool,
     pub scan_concurrency: Option<usize>,
+    /// Whether the scan should yield rows in reverse file order.
+    pub reversed: bool,
 }
 
 impl FileOpener for VortexOpener {
@@ -135,6 +137,7 @@ impl FileOpener for VortexOpener {
 
         let expr_convertor = self.expression_convertor.clone();
         let projection_pushdown = self.projection_pushdown;
+        let reversed = self.reversed;
 
         // Replace column access for partition columns with literals
         #[allow(clippy::disallowed_types)]
@@ -306,7 +309,8 @@ impl FileOpener for VortexOpener {
                 }
             };
 
-            let mut scan_builder = ScanBuilder::new(session.clone(), layout_reader);
+            let mut scan_builder =
+                ScanBuilder::new(session.clone(), layout_reader).with_reversed(reversed);
 
             if let Some(extensions) = file.extensions
                 && let Some(vortex_plan) = extensions.downcast_ref::<VortexAccessPlan>()
@@ -596,6 +600,7 @@ mod tests {
             segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         }
     }
 
@@ -691,6 +696,7 @@ mod tests {
             segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         let filter = col("a").lt(lit(100_i32));
@@ -778,6 +784,7 @@ mod tests {
             segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         let stream = opener.open(file)?.await?;
@@ -933,6 +940,7 @@ mod tests {
             segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         // This should succeed and return the correctly projected and cast data
@@ -993,6 +1001,7 @@ mod tests {
             segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         }
     }
 
@@ -1195,6 +1204,7 @@ mod tests {
             segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         let file = PartitionedFile::new(file_path.to_string(), data_size);

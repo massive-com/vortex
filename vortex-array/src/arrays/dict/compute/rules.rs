@@ -14,6 +14,7 @@ use crate::arrays::Dict;
 use crate::arrays::DictArray;
 use crate::arrays::ScalarFnArray;
 use crate::arrays::filter::FilterReduceAdaptor;
+use crate::arrays::reversed::ReverseReduceAdaptor;
 use crate::arrays::scalar_fn::AnyScalarFn;
 use crate::arrays::slice::SliceReduceAdaptor;
 use crate::builtins::ArrayBuiltins;
@@ -33,6 +34,7 @@ pub(crate) const PARENT_RULES: ParentRuleSet<Dict> = ParentRuleSet::new(&[
     ParentRuleSet::lift(&LikeReduceAdaptor(Dict)),
     ParentRuleSet::lift(&DictionaryScalarFnValuesPushDownRule),
     ParentRuleSet::lift(&DictionaryScalarFnCodesPullUpRule),
+    ParentRuleSet::lift(&ReverseReduceAdaptor(Dict)),
     ParentRuleSet::lift(&SliceReduceAdaptor(Dict)),
 ]);
 

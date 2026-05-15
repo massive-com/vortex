@@ -69,6 +69,8 @@ pub struct VortexSource {
     segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     options: VortexTableOptions,
+    /// Whether the underlying Vortex scan should yield rows in reverse file order.
+    reversed: bool,
 }
 
 impl VortexSource {
@@ -96,6 +98,7 @@ impl VortexSource {
             file_metadata_cache: None,
             segment_cache_builder: None,
             options: VortexTableOptions::default(),
+            reversed: false,
         }
     }
 
@@ -173,6 +176,20 @@ impl VortexSource {
         self.options = opts;
         self
     }
+
+    /// Whether the scan will yield rows in reverse file order.
+    pub fn reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Configure the scan to yield rows in reverse file order. See
+    /// [`ScanBuilder::with_reversed`] for semantics.
+    ///
+    /// [`ScanBuilder::with_reversed`]: vortex::scan::ScanBuilder::with_reversed
+    pub fn with_reversed(mut self, reversed: bool) -> Self {
+        self.reversed = reversed;
+        self
+    }
 }
 
 impl FileSource for VortexSource {
@@ -215,6 +232,7 @@ impl FileSource for VortexSource {
             segment_cache_builder: self.segment_cache_builder.clone(),
             projection_pushdown: self.options.projection_pushdown,
             scan_concurrency: self.options.scan_concurrency,
+            reversed: self.reversed,
         };
 
         Ok(Arc::new(opener))
