@@ -11,7 +11,6 @@ use crate::arrays::ChunkedArray;
 use crate::arrays::Constant;
 use crate::arrays::ConstantArray;
 use crate::arrays::ScalarFnArray;
-use crate::arrays::chunked::ChunkedArrayExt;
 use crate::arrays::reversed::ReverseReduceAdaptor;
 use crate::arrays::scalar_fn::AnyScalarFn;
 use crate::optimizer::ArrayOptimizer;

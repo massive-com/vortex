@@ -5,10 +5,8 @@ use vortex_error::VortexResult;
 
 use crate::ArrayRef;
 use crate::IntoArray as _;
-use crate::array::ArrayView;
 use crate::arrays::Chunked;
 use crate::arrays::ChunkedArray;
-use crate::arrays::chunked::ChunkedArrayExt as _;
 use crate::arrays::reversed::ReverseReduce;
 
 /// Reverses a `ChunkedArray` by reversing the chunk order and lazily reversing each chunk.
@@ -20,11 +18,11 @@ use crate::arrays::reversed::ReverseReduce;
 /// Each per-chunk `reverse()` call goes through the optimizer, so further reduce rules
 /// (e.g. `Dict` codes-only reversal) still fire on individual chunks.
 impl ReverseReduce for Chunked {
-    fn reverse(array: ArrayView<'_, Self>) -> VortexResult<Option<ArrayRef>> {
-        let dtype = array.as_ref().dtype().clone();
+    fn reverse(array: &ChunkedArray) -> VortexResult<Option<ArrayRef>> {
+        let dtype = array.dtype().clone();
         let reversed_chunks = array
             .chunks()
-            .into_iter()
+            .iter()
             .rev()
             .map(|chunk| chunk.reverse())
             .collect::<VortexResult<Vec<ArrayRef>>>()?;

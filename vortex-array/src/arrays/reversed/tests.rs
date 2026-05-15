@@ -7,10 +7,13 @@ use crate::Canonical;
 use crate::IntoArray as _;
 use crate::LEGACY_SESSION;
 use crate::VortexSessionExecute as _;
-use crate::arrays::struct_::StructArrayExt as _;
-use crate::arrays::{
-    BoolArray, Chunked, ChunkedArray, Dict, PrimitiveArray, Reversed, StructArray,
-};
+use crate::arrays::BoolArray;
+use crate::arrays::Chunked;
+use crate::arrays::ChunkedArray;
+use crate::arrays::Dict;
+use crate::arrays::PrimitiveArray;
+use crate::arrays::Reversed;
+use crate::arrays::StructArray;
 use crate::assert_arrays_eq;
 use crate::builders::dict::dict_encode;
 use crate::dtype::DType;
@@ -163,12 +166,13 @@ fn test_reverse_struct_preserves_dict_encoding() {
         panic!("expected Struct canonical");
     };
     // The field should still be dict-encoded (codes reversed, values intact).
+    let field = &s.unmasked_fields()[0];
     assert!(
-        s.unmasked_field(0).is::<Dict>(),
+        field.is::<Dict>(),
         "dict field should remain Dict-encoded after struct reversal"
     );
     let expected = PrimitiveArray::from_iter([2i32, 1, 2, 1]);
-    assert_arrays_eq!(s.unmasked_field(0), expected);
+    assert_arrays_eq!(field, expected);
 }
 
 /// Reversing a `ChunkedArray` must fire the `ReverseReduceAdaptor(Chunked)` rule,

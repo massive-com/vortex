@@ -5,17 +5,15 @@ use vortex_buffer::BitBuffer;
 use vortex_buffer::Buffer;
 use vortex_error::VortexResult;
 
+use crate::ArrayRef;
+use crate::Canonical;
+use crate::IntoArray as _;
 use crate::arrays::BoolArray;
 use crate::arrays::PrimitiveArray;
 use crate::arrays::StructArray;
-use crate::arrays::bool::BoolArrayExt as _;
-use crate::arrays::primitive::PrimitiveArrayExt as _;
-use crate::arrays::struct_::StructArrayExt as _;
-use crate::canonical::Canonical;
 use crate::executor::ExecutionCtx;
 use crate::match_each_native_ptype;
 use crate::validity::Validity;
-use crate::{ArrayRef, IntoArray as _};
 
 /// Reverses a canonical array, dispatching to type-specific fast paths where possible.
 ///
@@ -82,11 +80,12 @@ fn reverse_primitive(array: &PrimitiveArray) -> VortexResult<PrimitiveArray> {
 /// For dict-encoded fields this fires the `ReverseReduce for Dict` rule, so only the
 /// (small) codes array is reversed; the values dictionary remains untouched.
 fn reverse_struct(array: &StructArray) -> VortexResult<StructArray> {
-    let validity = reverse_validity(array.struct_validity())?;
+    let validity = reverse_validity(array.validity()?)?;
     let names = array.names().clone();
     let n = array.len();
     let reversed_fields = array
-        .iter_unmasked_fields()
+        .unmasked_fields()
+        .iter()
         .map(|field| field.reverse())
         .collect::<VortexResult<Vec<ArrayRef>>>()?;
     StructArray::try_new(names, reversed_fields, n, validity)
