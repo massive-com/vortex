@@ -36,15 +36,14 @@ mod rules;
 mod tests;
 mod vtable;
 
-pub use array::ReversedArrayExt;
-pub use vtable::{Reversed, ReversedArray};
-
+pub use array::ReversedArray;
 use vortex_error::VortexResult;
+pub use vtable::Reversed;
 
 use crate::ArrayRef;
-use crate::array::{ArrayView, VTable};
 use crate::matcher::Matcher;
 use crate::optimizer::rules::ArrayParentReduceRule;
+use crate::vtable::VTable;
 
 /// Metadata-only reversal for encodings that can avoid a full `take`.
 ///
@@ -59,7 +58,7 @@ use crate::optimizer::rules::ArrayParentReduceRule;
 /// reverse order.  Return `None` to fall back to the default execution path.
 pub trait ReverseReduce: VTable {
     /// Returns an array equivalent to reversing `array`, or `None` to fall back.
-    fn reverse(array: ArrayView<'_, Self>) -> VortexResult<Option<ArrayRef>>;
+    fn reverse(array: &Self::Array) -> VortexResult<Option<ArrayRef>>;
 }
 
 /// Adaptor that wraps a [`ReverseReduce`] implementation as an
@@ -75,14 +74,14 @@ impl<V: ReverseReduce> ArrayParentReduceRule<V> for ReverseReduceAdaptor<V> {
 
     fn reduce_parent(
         &self,
-        array: ArrayView<'_, V>,
+        array: &V::Array,
         _parent: <Self::Parent as Matcher>::Match<'_>,
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         debug_assert_eq!(child_idx, 0, "ReversedArray has exactly one child");
         // A one-element (or empty) array is already its own reverse.
-        if array.len() <= 1 {
-            return Ok(Some(array.array().clone()));
+        if V::len(array) <= 1 {
+            return Ok(Some(array.to_array()));
         }
         <V as ReverseReduce>::reverse(array)
     }

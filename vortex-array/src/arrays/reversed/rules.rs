@@ -4,9 +4,8 @@
 use vortex_error::VortexResult;
 
 use crate::ArrayRef;
-use crate::array::ArrayView;
 use crate::arrays::Reversed;
-use crate::arrays::reversed::ReversedArrayExt as _;
+use crate::arrays::reversed::array::ReversedArray;
 use crate::optimizer::rules::ArrayParentReduceRule;
 use crate::optimizer::rules::ParentRuleSet;
 
@@ -27,8 +26,8 @@ impl ArrayParentReduceRule<Reversed> for DoubleReversalCancelRule {
 
     fn reduce_parent(
         &self,
-        array: ArrayView<'_, Reversed>,
-        _parent: ArrayView<'_, Reversed>,
+        array: &ReversedArray,
+        _parent: &ReversedArray,
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         debug_assert_eq!(child_idx, 0, "ReversedArray has exactly one child");

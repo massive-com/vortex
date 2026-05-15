@@ -3,39 +3,39 @@
 
 use vortex_error::VortexExpect as _;
 use vortex_error::VortexResult;
+use vortex_error::vortex_ensure;
 
 use crate::ArrayRef;
-use crate::array::{Array, ArrayParts, EmptyArrayData, TypedArrayRef};
-use crate::arrays::Reversed;
+use crate::dtype::DType;
+use crate::stats::ArrayStats;
 
-/// Slot index for the inner (to-be-reversed) child array.
-pub(super) const CHILD_SLOT: usize = 0;
-pub(super) const NUM_SLOTS: usize = 1;
-pub(super) const SLOT_NAMES: [&str; NUM_SLOTS] = ["child"];
-
-/// Extension trait for accessing [`ReversedArray`](crate::arrays::ReversedArray) properties.
-pub trait ReversedArrayExt: TypedArrayRef<Reversed> {
-    /// Returns the inner array whose elements will be yielded in reverse order.
-    fn child(&self) -> &ArrayRef {
-        self.as_ref().slots()[CHILD_SLOT]
-            .as_ref()
-            .vortex_expect("validated ReversedArray child slot")
-    }
+#[derive(Clone, Debug)]
+pub struct ReversedArray {
+    pub(super) child: ArrayRef,
+    pub(super) dtype: DType,
+    pub(super) len: usize,
+    pub(super) stats: ArrayStats,
 }
 
-impl<T: TypedArrayRef<Reversed>> ReversedArrayExt for T {}
-
-impl Array<Reversed> {
-    /// Wraps `child` in a [`ReversedArray`](crate::arrays::ReversedArray).
+impl ReversedArray {
+    /// Wraps `child` in a [`ReversedArray`].
     pub fn try_new(child: ArrayRef) -> VortexResult<Self> {
         let dtype = child.dtype().clone();
         let len = child.len();
-        Array::try_from_parts(
-            ArrayParts::new(Reversed, dtype, len, EmptyArrayData).with_slots(vec![Some(child)]),
-        )
+        Ok(Self {
+            child,
+            dtype,
+            len,
+            stats: ArrayStats::default(),
+        })
     }
 
-    /// Wraps `child` in a [`ReversedArray`](crate::arrays::ReversedArray) without validation.
+    /// Wraps `child` in a [`ReversedArray`].
+    pub fn new(child: ArrayRef) -> Self {
+        Self::try_new(child).vortex_expect("failed to construct ReversedArray")
+    }
+
+    /// Wraps `child` in a [`ReversedArray`] without validation.
     ///
     /// # Safety
     ///
@@ -43,10 +43,33 @@ impl Array<Reversed> {
     pub unsafe fn new_unchecked(child: ArrayRef) -> Self {
         let dtype = child.dtype().clone();
         let len = child.len();
-        unsafe {
-            Array::from_parts_unchecked(
-                ArrayParts::new(Reversed, dtype, len, EmptyArrayData).with_slots(vec![Some(child)]),
-            )
+        Self {
+            child,
+            dtype,
+            len,
+            stats: ArrayStats::default(),
         }
+    }
+
+    /// Returns the inner array whose elements will be yielded in reverse order.
+    pub fn child(&self) -> &ArrayRef {
+        &self.child
+    }
+
+    /// Validates the components that would be used to construct a [`ReversedArray`].
+    pub fn validate(child: &ArrayRef, dtype: &DType, len: usize) -> VortexResult<()> {
+        vortex_ensure!(
+            child.dtype() == dtype,
+            "ReversedArray dtype {} does not match child dtype {}",
+            dtype,
+            child.dtype(),
+        );
+        vortex_ensure!(
+            child.len() == len,
+            "ReversedArray length {} does not match child length {}",
+            len,
+            child.len(),
+        );
+        Ok(())
     }
 }

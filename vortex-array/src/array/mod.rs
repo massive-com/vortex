@@ -38,6 +38,7 @@ use crate::arrays::DictArray;
 use crate::arrays::FilterArray;
 use crate::arrays::Null;
 use crate::arrays::Primitive;
+use crate::arrays::ReversedArray;
 use crate::arrays::ScalarFnVTable;
 use crate::arrays::SliceArray;
 use crate::arrays::VarBin;
@@ -110,6 +111,11 @@ pub trait DynArray:
 
     /// Wraps the array in a [`DictArray`] such that it is logically taken by the given indices.
     fn take(&self, indices: ArrayRef) -> VortexResult<ArrayRef>;
+
+    /// Wraps the array in a [`ReversedArray`](crate::arrays::ReversedArray) such that it is
+    /// logically yielded in reverse element order. The optimizer is run immediately, which may
+    /// eliminate the wrapper (e.g. for `Reversed(Reversed(x)) → x` or `Reversed(Dict(...))`).
+    fn reverse(&self) -> VortexResult<ArrayRef>;
 
     /// Fetch the scalar at the given index.
     ///
@@ -211,6 +217,10 @@ impl DynArray for Arc<dyn DynArray> {
 
     fn take(&self, indices: ArrayRef) -> VortexResult<ArrayRef> {
         self.as_ref().take(indices)
+    }
+
+    fn reverse(&self) -> VortexResult<ArrayRef> {
+        self.as_ref().reverse()
     }
 
     #[inline]
@@ -524,6 +534,12 @@ impl<V: VTable> DynArray for ArrayAdapter<V> {
 
     fn take(&self, indices: ArrayRef) -> VortexResult<ArrayRef> {
         DictArray::try_new(indices, self.to_array())?
+            .into_array()
+            .optimize()
+    }
+
+    fn reverse(&self) -> VortexResult<ArrayRef> {
+        ReversedArray::try_new(self.to_array())?
             .into_array()
             .optimize()
     }
