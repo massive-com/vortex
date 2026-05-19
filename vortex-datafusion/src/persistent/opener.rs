@@ -40,6 +40,9 @@ use vortex::error::VortexError;
 use vortex::file::OpenOptionsSessionExt;
 use vortex::io::InstrumentedReadAt;
 use vortex::layout::LayoutReader;
+use vortex::layout::segments::FileIdentity;
+use vortex::layout::segments::FileVersion;
+use vortex::layout::segments::SegmentCacheBuilder;
 use vortex::metrics::Label;
 use vortex::metrics::MetricsRegistry;
 use vortex::scan::ScanBuilder;
@@ -54,10 +57,6 @@ use crate::convert::exprs::make_vortex_predicate;
 use crate::convert::schema::calculate_physical_schema;
 use crate::metrics::PARTITION_LABEL;
 use crate::metrics::PATH_LABEL;
-use vortex::layout::segments::FileIdentity;
-use vortex::layout::segments::FileVersion;
-use vortex::layout::segments::SegmentCacheBuilder;
-
 use crate::persistent::cache::CachedVortexMetadata;
 use crate::persistent::reader::VortexReaderFactory;
 use crate::persistent::stream::PrunableStream;
@@ -360,9 +359,7 @@ impl FileOpener for VortexOpener {
                 })
                 .transpose()?;
 
-            if let Some(limit) = limit
-                && filter.is_none()
-            {
+            if let Some(limit) = limit {
                 scan_builder = scan_builder.with_limit(limit);
             }
 

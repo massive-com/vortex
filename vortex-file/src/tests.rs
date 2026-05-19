@@ -1696,3 +1696,67 @@ async fn timestamp_unit_mismatch_errors_with_constant_children()
 
     Ok(())
 }
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn limit_with_filter_truncates_globally() -> VortexResult<()> {
+    // A chunked array exposes multiple splits so the scan exercises the atomic-limit
+    // reservation across concurrent split tasks.
+    let chunks = (0..5)
+        .map(|chunk_idx| {
+            let base = chunk_idx * 100;
+            (base..base + 100).collect::<PrimitiveArray>().into_array()
+        })
+        .collect::<Vec<_>>();
+    let numbers = ChunkedArray::from_iter(chunks).into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    // 500 rows total, 250 match the filter (n >= 250), but the limit caps the output at 7.
+    let result = file
+        .scan()?
+        .with_filter(gt_eq(get_item("n", root()), lit(250_i32)))
+        .with_limit(7)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    assert_eq!(
+        result.len(),
+        7,
+        "limit should be honored even when a filter is set",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn limit_zero_with_filter_yields_no_rows() -> VortexResult<()> {
+    let numbers = (0..200).collect::<PrimitiveArray>().into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    let result = file
+        .scan()?
+        .with_filter(gt_eq(get_item("n", root()), lit(0_i32)))
+        .with_limit(0)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    assert_eq!(result.len(), 0);
+    Ok(())
+}

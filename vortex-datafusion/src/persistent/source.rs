@@ -13,13 +13,17 @@ use datafusion_datasource::file::FileSource;
 use datafusion_datasource::file_scan_config::FileScanConfig;
 use datafusion_datasource::file_stream::FileOpener;
 use datafusion_execution::cache::cache_manager::FileMetadataCache;
+use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_expr::conjunction;
 use datafusion_physical_expr::projection::ProjectionExprs;
 use datafusion_physical_expr_adapter::DefaultPhysicalExprAdapterFactory;
 use datafusion_physical_expr_common::physical_expr::fmt_sql;
+use datafusion_physical_expr_common::sort_expr::LexOrdering;
+use datafusion_physical_expr_common::sort_expr::PhysicalSortExpr;
 use datafusion_physical_plan::DisplayFormatType;
 use datafusion_physical_plan::PhysicalExpr;
+use datafusion_physical_plan::SortOrderPushdownResult;
 use datafusion_physical_plan::filter_pushdown::FilterPushdownPropagation;
 use datafusion_physical_plan::filter_pushdown::PushedDown;
 use datafusion_physical_plan::filter_pushdown::PushedDownPredicate;
@@ -266,12 +270,18 @@ impl FileSource for VortexSource {
                 if let Some(ref predicate) = self.vortex_predicate {
                     write!(f, ", predicate: {predicate}")?;
                 }
+                if self.reversed {
+                    write!(f, ", reversed: true")?;
+                }
             }
             // Use TreeRender style key=value formatting to display the predicate
             DisplayFormatType::TreeRender => {
                 if let Some(ref predicate) = self.vortex_predicate {
                     writeln!(f, "predicate={}", fmt_sql(predicate.as_ref()))?;
                 };
+                if self.reversed {
+                    writeln!(f, "reversed=true")?;
+                }
             }
         }
         Ok(())
@@ -357,6 +367,44 @@ impl FileSource for VortexSource {
         let mut source = self.clone();
         source.projection = self.projection.try_merge(projection)?;
         Ok(Some(Arc::new(source)))
+    }
+
+    /// Attempt to push down a reversed scan when the requested ordering is the strict reverse
+    /// of one of the source's declared output orderings.
+    ///
+    /// We flip the intra-file split order via [`VortexSource::with_reversed`] and let
+    /// `FileScanConfig::rebuild_with_source` flip the `file_groups` order. We return
+    /// `Inexact` rather than `Exact` because DataFusion 52's `rebuild_with_source` only
+    /// clears the declared `output_ordering` for the `Inexact` branch; returning `Exact`
+    /// would leave a stale `output_ordering` on the rebuilt config and trip the sanity
+    /// checker. The planner keeps the upstream `SortPreservingMergeExec` but the reversed
+    /// scan still produces locally-sorted streams in the requested order, which is what
+    /// enables filter + LIMIT pushdown to short-circuit on the first file.
+    fn try_reverse_output(
+        &self,
+        order: &[PhysicalSortExpr],
+        eq_properties: &EquivalenceProperties,
+    ) -> DFResult<SortOrderPushdownResult<Arc<dyn FileSource>>> {
+        let Some(requested) = LexOrdering::new(order.iter().cloned()) else {
+            return Ok(SortOrderPushdownResult::Unsupported);
+        };
+
+        // The source advertises one or more candidate orderings via its equivalence
+        // properties. We can satisfy the request by reading in reverse only if reversing
+        // some declared ordering yields a prefix that matches the request.
+        let can_reverse = eq_properties
+            .oeq_class()
+            .iter()
+            .any(|candidate| candidate.is_reverse(&requested));
+
+        if !can_reverse {
+            return Ok(SortOrderPushdownResult::Unsupported);
+        }
+
+        let reversed = self.clone().with_reversed(!self.reversed);
+        Ok(SortOrderPushdownResult::Inexact {
+            inner: Arc::new(reversed) as Arc<dyn FileSource>,
+        })
     }
 
     fn projection(&self) -> Option<&ProjectionExprs> {
