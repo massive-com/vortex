@@ -300,6 +300,8 @@ pub fn vortex_scan::ScanBuilder<A>::ordered(&self) -> bool
 
 pub fn vortex_scan::ScanBuilder<A>::prepare(self) -> vortex_error::VortexResult<vortex_scan::RepeatedScan<A>>
 
+pub fn vortex_scan::ScanBuilder<A>::reversed(&self) -> bool
+
 pub fn vortex_scan::ScanBuilder<A>::session(&self) -> &vortex_session::VortexSession
 
 pub fn vortex_scan::ScanBuilder<A>::with_concurrency(self, concurrency: usize) -> Self
@@ -313,6 +315,8 @@ pub fn vortex_scan::ScanBuilder<A>::with_metrics_registry(self, metrics: alloc::
 pub fn vortex_scan::ScanBuilder<A>::with_ordered(self, ordered: bool) -> Self
 
 pub fn vortex_scan::ScanBuilder<A>::with_projection(self, projection: vortex_array::expr::expression::Expression) -> Self
+
+pub fn vortex_scan::ScanBuilder<A>::with_reversed(self, reversed: bool) -> Self
 
 pub fn vortex_scan::ScanBuilder<A>::with_row_indices(self, row_indices: vortex_buffer::buffer::Buffer<u64>) -> Self
 
