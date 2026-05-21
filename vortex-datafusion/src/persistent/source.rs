@@ -372,14 +372,25 @@ impl FileSource for VortexSource {
     /// Attempt to push down a reversed scan when the requested ordering is the strict reverse
     /// of one of the source's declared output orderings.
     ///
-    /// We flip the intra-file split order via [`VortexSource::with_reversed`] and let
-    /// `FileScanConfig::rebuild_with_source` flip the `file_groups` order. We return
-    /// `Inexact` rather than `Exact` because DataFusion 52's `rebuild_with_source` only
-    /// clears the declared `output_ordering` for the `Inexact` branch; returning `Exact`
-    /// would leave a stale `output_ordering` on the rebuilt config and trip the sanity
-    /// checker. The planner keeps the upstream `SortPreservingMergeExec` but the reversed
-    /// scan still produces locally-sorted streams in the requested order, which is what
-    /// enables filter + LIMIT pushdown to short-circuit on the first file.
+    /// Mental model: the rebuilt source emits rows **already in the target order**, and the
+    /// scan-time atomic counter inside `VortexOpener` caps emission once the LIMIT is
+    /// satisfied. This is fundamentally different from the
+    /// dynamic-filter-pushdown shape `ParquetSource` uses for unsorted `ORDER BY x LIMIT k`,
+    /// where TopK above the scan feeds bounds back as a dynamic filter. Here the source is
+    /// the correctness guarantor for ordering; the `SortExec(TopK)` left above the rebuilt
+    /// source by the planner is just a passthrough cap plus a cross-split merge.
+    ///
+    /// The reversal itself is **exact** at the Vortex layer: `ScanBuilder::with_reversed`
+    /// flips intra-file split order *and* reverses rows within each chunk (via
+    /// `ArrayRef::reverse` on every produced array), so each file emits its rows in true
+    /// reverse order — not just reversed at chunk granularity. Combined with
+    /// `FileScanConfig::rebuild_with_source` reversing the `file_groups` order, the
+    /// overall stream is fully reversed. We could in principle return `Exact` and let the
+    /// planner drop the upstream sort entirely, but DataFusion 52's `rebuild_with_source`
+    /// only clears the stale `output_ordering` on the `Inexact` branch — returning `Exact`
+    /// would leave the rebuilt config still advertising the original (now-violated)
+    /// ordering and trip the sanity checker. So the `Inexact` return here is a
+    /// DataFusion-52 plumbing concession, not a Vortex correctness limitation.
     fn try_reverse_output(
         &self,
         order: &[PhysicalSortExpr],
