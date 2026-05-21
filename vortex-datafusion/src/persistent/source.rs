@@ -413,6 +413,13 @@ impl FileSource for VortexSource {
         }
 
         let reversed = self.clone().with_reversed(!self.reversed);
+        // TODO(df53): switch to `SortOrderPushdownResult::Exact` once the workspace bumps to
+        // DataFusion 53+. The reversal is exact at the Vortex layer; only DF 52's
+        // `rebuild_with_source` (which keeps the stale `output_ordering` on the `Exact`
+        // branch and trips `SanityCheckPlan`) forces us to return `Inexact` here. The DF 53
+        // rewrite renames this hook to `try_pushdown_sort` and lets the source publish the
+        // new ordering, so `Exact` becomes correct and lets the planner drop the upstream
+        // `SortExec` entirely.
         Ok(SortOrderPushdownResult::Inexact {
             inner: Arc::new(reversed) as Arc<dyn FileSource>,
         })
