@@ -40,6 +40,8 @@ pub struct RepeatedScan<A: 'static + Send> {
     projection: Expression,
     filter: Option<Expression>,
     ordered: bool,
+    /// Whether to iterate chunks in reverse order.
+    reversed: bool,
     /// Optionally read a subset of the rows in the file.
     row_range: Option<Range<u64>>,
     /// The selection mask to apply to the selected row range.
@@ -94,6 +96,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
         projection: Expression,
         filter: Option<Expression>,
         ordered: bool,
+        reversed: bool,
         row_range: Option<Range<u64>>,
         selection: Selection,
         splits: Splits,
@@ -108,6 +111,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
             projection,
             filter,
             ordered,
+            reversed,
             row_range,
             selection,
             splits,
@@ -168,6 +172,12 @@ impl<A: 'static + Send> RepeatedScan<A> {
         let mut limit = self.limit;
         let mut tasks = Vec::new();
 
+        let ranges = if self.reversed {
+            Either::Left(ranges.collect::<Vec<_>>().into_iter().rev())
+        } else {
+            Either::Right(ranges)
+        };
+
         for range in ranges {
             if range.start >= range.end {
                 continue;
@@ -195,7 +205,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
         let stream =
             futures::stream::iter(self.execute(row_range)?).map(move |task| handle.spawn(task));
 
-        let stream = if self.ordered {
+        let stream = if self.ordered || self.reversed {
             stream.buffered(concurrency).boxed()
         } else {
             stream.buffer_unordered(concurrency).boxed()

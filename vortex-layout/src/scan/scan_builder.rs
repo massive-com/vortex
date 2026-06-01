@@ -14,6 +14,8 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use vortex_array::ArrayRef;
+use vortex_array::IntoArray;
+use vortex_array::arrays::PrimitiveArray;
 use vortex_array::dtype::DType;
 use vortex_array::dtype::Field;
 use vortex_array::dtype::FieldMask;
@@ -56,6 +58,8 @@ pub struct ScanBuilder<A> {
     filter: Option<Expression>,
     /// Whether the scan needs to return splits in the order they appear in the file.
     ordered: bool,
+    /// Whether to yield chunks in reverse file order, with rows within each chunk also reversed.
+    reversed: bool,
     /// Optionally read a subset of the rows in the file.
     row_range: Option<Range<u64>>,
     /// The selection mask to apply to the selected row range.
@@ -85,6 +89,7 @@ impl ScanBuilder<ArrayRef> {
             projection: root(),
             filter: None,
             ordered: true,
+            reversed: false,
             row_range: None,
             selection: Default::default(),
             split_by: SplitBy::Layout,
@@ -144,6 +149,18 @@ impl<A: 'static + Send> ScanBuilder<A> {
 
     pub fn with_ordered(mut self, ordered: bool) -> Self {
         self.ordered = ordered;
+        self
+    }
+
+    pub fn reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Reverse the scan order: chunks are yielded last-to-first, and rows within each chunk are
+    /// also reversed. This produces a globally reversed row sequence without reading the whole
+    /// file first.
+    pub fn with_reversed(mut self, reversed: bool) -> Self {
+        self.reversed = reversed;
         self
     }
 
@@ -226,6 +243,7 @@ impl<A: 'static + Send> ScanBuilder<A> {
             projection: self.projection,
             filter: self.filter,
             ordered: self.ordered,
+            reversed: self.reversed,
             row_range: self.row_range,
             selection: self.selection,
             split_by: self.split_by,
@@ -286,17 +304,28 @@ impl<A: 'static + Send> ScanBuilder<A> {
                 )?)
             };
 
+        let map_fn = if self.reversed {
+            let original = self.map_fn;
+            Arc::new(move |array: ArrayRef| {
+                let indices = PrimitiveArray::from_iter((0..array.len() as u64).rev()).into_array();
+                original(array.take(indices)?)
+            }) as Arc<dyn Fn(ArrayRef) -> VortexResult<A> + Send + Sync>
+        } else {
+            self.map_fn
+        };
+
         Ok(RepeatedScan::new(
             self.session.clone(),
             layout_reader,
             projection,
             filter,
             self.ordered,
+            self.reversed,
             self.row_range,
             self.selection,
             splits,
             self.concurrency,
-            self.map_fn,
+            map_fn,
             self.limit,
             dtype,
         ))
@@ -367,7 +396,7 @@ impl<A: 'static + Send> Stream for LazyScanStream<A> {
             match &mut self.state {
                 LazyScanState::Builder(builder) => {
                     let builder = builder.take().vortex_expect("polled after completion");
-                    let ordered = builder.ordered;
+                    let ordered = builder.ordered || builder.reversed;
                     let num_workers = get_available_parallelism().unwrap_or(1);
                     let concurrency = builder.concurrency * num_workers;
                     let handle = builder.session.handle();

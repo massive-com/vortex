@@ -30,6 +30,7 @@ use object_store::path::Path;
 use vortex::error::VortexExpect;
 use vortex::file::VORTEX_FILE_EXTENSION;
 use vortex::layout::LayoutReader;
+use vortex::layout::segments::SegmentCacheBuilder;
 use vortex::metrics::DefaultMetricsRegistry;
 use vortex::metrics::MetricsRegistry;
 use vortex::session::VortexSession;
@@ -192,8 +193,11 @@ pub struct VortexSource {
     pub(crate) vortex_reader_factory: Option<Arc<dyn VortexReaderFactory>>,
     vx_metrics_registry: Arc<dyn MetricsRegistry>,
     file_metadata_cache: Option<Arc<dyn FileMetadataCache>>,
+    segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     options: VortexTableOptions,
+    /// Whether the underlying Vortex scan should yield rows in reverse file order.
+    reversed: bool,
 }
 
 impl VortexSource {
@@ -224,7 +228,9 @@ impl VortexSource {
             vortex_reader_factory: None,
             vx_metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             options: VortexTableOptions::default(),
+            reversed: false,
         }
     }
 
@@ -283,6 +289,12 @@ impl VortexSource {
         self
     }
 
+    /// Sets a [`SegmentCacheBuilder`] to reuse segment bytes across scans.
+    pub fn with_segment_cache_builder(mut self, builder: Arc<dyn SegmentCacheBuilder>) -> Self {
+        self.segment_cache_builder = Some(builder);
+        self
+    }
+
     /// Sets the per-file Vortex scan concurrency.
     ///
     /// This is separate from DataFusion's partition-level parallelism.
@@ -299,6 +311,17 @@ impl VortexSource {
     /// Replaces the table options for this source.
     pub fn with_options(mut self, opts: VortexTableOptions) -> Self {
         self.options = opts;
+        self
+    }
+
+    /// Whether the scan will yield rows in reverse file order.
+    pub fn reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Configure the scan to yield rows in reverse file order.
+    pub fn with_reversed(mut self, reversed: bool) -> Self {
+        self.reversed = reversed;
         self
     }
 
@@ -339,8 +362,10 @@ impl VortexSource {
             has_output_ordering: !base_config.output_ordering.is_empty(),
             expression_convertor: Arc::clone(&self.expression_convertor),
             file_metadata_cache: self.file_metadata_cache.clone(),
+            segment_cache_builder: self.segment_cache_builder.clone(),
             projection_pushdown: self.options.projection_pushdown,
             scan_concurrency: self.options.scan_concurrency,
+            reversed: self.reversed,
         };
 
         Ok(opener)
