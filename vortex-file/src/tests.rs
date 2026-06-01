@@ -1862,6 +1862,45 @@ async fn test_segment_ordering_dict_codes_before_values() -> VortexResult<()> {
 
 #[tokio::test]
 #[cfg_attr(miri, ignore)]
+async fn limit_with_filter_truncates_globally() -> VortexResult<()> {
+    // A chunked array exposes multiple splits so the scan exercises the atomic-limit
+    // reservation across concurrent split tasks.
+    let chunks = (0..5)
+        .map(|chunk_idx| {
+            let base = chunk_idx * 100;
+            (base..base + 100).collect::<PrimitiveArray>().into_array()
+        })
+        .collect::<Vec<_>>();
+    let numbers = ChunkedArray::from_iter(chunks).into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    // 500 rows total, 250 match the filter (n >= 250), but the limit caps the output at 7.
+    let result = file
+        .scan()?
+        .with_filter(gt_eq(get_item("n", root()), lit(250_i32)))
+        .with_limit(7)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    assert_eq!(
+        result.len(),
+        7,
+        "limit should be honored even when a filter is set",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
 async fn test_segment_ordering_zonemaps_after_data() -> VortexResult<()> {
     // Create a multi-column struct with enough rows to produce zone maps.
     let n = 100_000;
@@ -1951,5 +1990,70 @@ async fn test_segment_ordering_zonemaps_after_data() -> VortexResult<()> {
         "global: all data segments should come before all zone map segments",
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn limit_with_filter_straddles_split_boundary() -> VortexResult<()> {
+    // Three splits, filter matches every row, so total matching (300) exceeds the
+    // shared limit (250). At least one split must observe `reserved < true_count` and
+    // trim its mask via `Mask::limit(reserved)` — the most subtle correctness path in
+    // the atomic-limit design. Earlier-contributing splits exercise the
+    // `reserved == true_count` (no-trim) branch; later splits short-circuit at the
+    // top-of-function `remaining == 0` check.
+    let chunks = (0..3)
+        .map(|chunk_idx| {
+            let base = chunk_idx * 100;
+            (base..base + 100).collect::<PrimitiveArray>().into_array()
+        })
+        .collect::<Vec<_>>();
+    let numbers = ChunkedArray::from_iter(chunks).into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    let result = file
+        .scan()?
+        .with_filter(gt_eq(get_item("n", root()), lit(0_i32)))
+        .with_limit(250)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    // Soft cap: total emission must equal the limit because the filter accepts
+    // everything and the limit straddles a split boundary.
+    assert_eq!(result.len(), 250);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn limit_zero_with_filter_yields_no_rows() -> VortexResult<()> {
+    let numbers = (0..200).collect::<PrimitiveArray>().into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    let result = file
+        .scan()?
+        .with_filter(gt_eq(get_item("n", root()), lit(0_i32)))
+        .with_limit(0)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    assert_eq!(result.len(), 0);
     Ok(())
 }
