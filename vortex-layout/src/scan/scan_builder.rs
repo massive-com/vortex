@@ -30,7 +30,6 @@ use vortex_array::stream::ArrayStreamAdapter;
 use vortex_buffer::Buffer;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
-use vortex_error::vortex_bail;
 use vortex_io::runtime::BlockingRuntime;
 use vortex_io::runtime::Handle;
 use vortex_io::runtime::Task;
@@ -260,10 +259,6 @@ impl<A: 'static + Send> ScanBuilder<A> {
 
     pub fn prepare(self) -> VortexResult<RepeatedScan<A>> {
         let dtype = self.dtype()?;
-
-        if self.filter.is_some() && self.limit.is_some() {
-            vortex_bail!("Vortex doesn't support scans with both a filter and a limit")
-        }
 
         // Spin up the root layout reader, and wrap it in a FilterLayoutReader to perform
         // conjunction splitting if a filter is provided.

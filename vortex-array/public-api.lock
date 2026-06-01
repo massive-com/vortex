@@ -1596,6 +1596,10 @@ impl vortex_array::arrays::filter::FilterKernel for vortex_array::arrays::Chunke
 
 pub fn vortex_array::arrays::Chunked::filter(vortex_array::ArrayView<'_, vortex_array::arrays::Chunked>, &vortex_mask::Mask, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::Chunked
+
+pub fn vortex_array::arrays::Chunked::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::Chunked>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
 impl vortex_array::arrays::slice::SliceKernel for vortex_array::arrays::Chunked
 
 pub fn vortex_array::arrays::Chunked::slice(vortex_array::ArrayView<'_, Self>, core::ops::range::Range<usize>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
@@ -2160,6 +2164,10 @@ impl vortex_array::arrays::filter::FilterReduce for vortex_array::arrays::dict::
 
 pub fn vortex_array::arrays::dict::Dict::filter(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>, &vortex_mask::Mask) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::dict::Dict
+
+pub fn vortex_array::arrays::dict::Dict::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
 impl vortex_array::arrays::slice::SliceReduce for vortex_array::arrays::dict::Dict
 
 pub fn vortex_array::arrays::dict::Dict::slice(vortex_array::ArrayView<'_, Self>, core::ops::range::Range<usize>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
@@ -2251,6 +2259,10 @@ pub fn vortex_array::arrays::dict::Dict::take(vortex_array::ArrayView<'_, vortex
 impl vortex_array::arrays::filter::FilterReduce for vortex_array::arrays::dict::Dict
 
 pub fn vortex_array::arrays::dict::Dict::filter(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>, &vortex_mask::Mask) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::dict::Dict
+
+pub fn vortex_array::arrays::dict::Dict::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
 impl vortex_array::arrays::slice::SliceReduce for vortex_array::arrays::dict::Dict
 
@@ -4072,6 +4084,104 @@ pub fn vortex_array::arrays::primitive::patch_chunk<T, I, C>(&mut [T], &[I], &[T
 
 pub type vortex_array::arrays::primitive::PrimitiveArray = vortex_array::Array<vortex_array::arrays::Primitive>
 
+pub mod vortex_array::arrays::reversed
+
+pub struct vortex_array::arrays::reversed::ReverseReduceAdaptor<V>(pub V)
+
+impl<V: core::default::Default> core::default::Default for vortex_array::arrays::reversed::ReverseReduceAdaptor<V>
+
+pub fn vortex_array::arrays::reversed::ReverseReduceAdaptor<V>::default() -> vortex_array::arrays::reversed::ReverseReduceAdaptor<V>
+
+impl<V: core::fmt::Debug> core::fmt::Debug for vortex_array::arrays::reversed::ReverseReduceAdaptor<V>
+
+pub fn vortex_array::arrays::reversed::ReverseReduceAdaptor<V>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl<V: vortex_array::arrays::reversed::ReverseReduce> vortex_array::optimizer::rules::ArrayParentReduceRule<V> for vortex_array::arrays::reversed::ReverseReduceAdaptor<V>
+
+pub type vortex_array::arrays::reversed::ReverseReduceAdaptor<V>::Parent = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::reversed::ReverseReduceAdaptor<V>::reduce_parent(&self, vortex_array::ArrayView<'_, V>, <Self::Parent as vortex_array::matcher::Matcher>::Match, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub struct vortex_array::arrays::reversed::Reversed
+
+impl core::clone::Clone for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::clone(&self) -> vortex_array::arrays::Reversed
+
+impl core::fmt::Debug for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::OperationsVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
+
+impl vortex_array::VTable for vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::OperationsVTable = vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::TypedArrayData = vortex_array::EmptyArrayData
+
+pub type vortex_array::arrays::Reversed::ValidityVTable = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::append_to_builder(vortex_array::ArrayView<'_, Self>, &mut dyn vortex_array::builders::ArrayBuilder, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<()>
+
+pub fn vortex_array::arrays::Reversed::buffer(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::buffer::BufferHandle
+
+pub fn vortex_array::arrays::Reversed::buffer_name(vortex_array::ArrayView<'_, Self>, usize) -> core::option::Option<alloc::string::String>
+
+pub fn vortex_array::arrays::Reversed::child(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::ArrayRef
+
+pub fn vortex_array::arrays::Reversed::child_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::deserialize(&self, &vortex_array::dtype::DType, usize, &[u8], &[vortex_array::buffer::BufferHandle], &dyn vortex_array::serde::ArrayChildren, &vortex_session::VortexSession) -> vortex_error::VortexResult<vortex_array::ArrayParts<Self>>
+
+pub fn vortex_array::arrays::Reversed::execute(vortex_array::Array<Self>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::ExecutionResult>
+
+pub fn vortex_array::arrays::Reversed::execute_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::id(&self) -> vortex_array::ArrayId
+
+pub fn vortex_array::arrays::Reversed::nbuffers(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::nchildren(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::reduce(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::reduce_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::serialize(vortex_array::ArrayView<'_, Self>, &vortex_session::VortexSession) -> vortex_error::VortexResult<core::option::Option<alloc::vec::Vec<u8>>>
+
+pub fn vortex_array::arrays::Reversed::slot_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::validate(&self, &Self::TypedArrayData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
+
+impl vortex_array::ValidityVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::validity(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>) -> vortex_error::VortexResult<vortex_array::validity::Validity>
+
+pub trait vortex_array::arrays::reversed::ReverseReduce: vortex_array::VTable
+
+pub fn vortex_array::arrays::reversed::ReverseReduce::reverse(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::Chunked
+
+pub fn vortex_array::arrays::Chunked::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::Chunked>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::dict::Dict
+
+pub fn vortex_array::arrays::dict::Dict::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub trait vortex_array::arrays::reversed::ReversedArrayExt: vortex_array::TypedArrayRef<vortex_array::arrays::Reversed>
+
+pub fn vortex_array::arrays::reversed::ReversedArrayExt::child(&self) -> &vortex_array::ArrayRef
+
+impl<T: vortex_array::TypedArrayRef<vortex_array::arrays::Reversed>> vortex_array::arrays::reversed::ReversedArrayExt for T
+
+pub fn T::child(&self) -> &vortex_array::ArrayRef
+
+pub type vortex_array::arrays::reversed::ReversedArray = vortex_array::Array<vortex_array::arrays::Reversed>
+
 pub mod vortex_array::arrays::scalar_fn
 
 pub mod vortex_array::arrays::scalar_fn::plugin
@@ -5530,6 +5640,10 @@ impl vortex_array::arrays::filter::FilterKernel for vortex_array::arrays::Chunke
 
 pub fn vortex_array::arrays::Chunked::filter(vortex_array::ArrayView<'_, vortex_array::arrays::Chunked>, &vortex_mask::Mask, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::Chunked
+
+pub fn vortex_array::arrays::Chunked::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::Chunked>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
 impl vortex_array::arrays::slice::SliceKernel for vortex_array::arrays::Chunked
 
 pub fn vortex_array::arrays::Chunked::slice(vortex_array::ArrayView<'_, Self>, core::ops::range::Range<usize>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
@@ -5797,6 +5911,10 @@ pub fn vortex_array::arrays::dict::Dict::take(vortex_array::ArrayView<'_, vortex
 impl vortex_array::arrays::filter::FilterReduce for vortex_array::arrays::dict::Dict
 
 pub fn vortex_array::arrays::dict::Dict::filter(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>, &vortex_mask::Mask) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+impl vortex_array::arrays::reversed::ReverseReduce for vortex_array::arrays::dict::Dict
+
+pub fn vortex_array::arrays::dict::Dict::reverse(vortex_array::ArrayView<'_, vortex_array::arrays::dict::Dict>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
 impl vortex_array::arrays::slice::SliceReduce for vortex_array::arrays::dict::Dict
 
@@ -6530,6 +6648,64 @@ impl vortex_array::scalar_fn::fns::mask::MaskReduce for vortex_array::arrays::Pr
 
 pub fn vortex_array::arrays::Primitive::mask(vortex_array::ArrayView<'_, vortex_array::arrays::Primitive>, &vortex_array::ArrayRef) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
+pub struct vortex_array::arrays::Reversed
+
+impl core::clone::Clone for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::clone(&self) -> vortex_array::arrays::Reversed
+
+impl core::fmt::Debug for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::OperationsVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
+
+impl vortex_array::VTable for vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::OperationsVTable = vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::TypedArrayData = vortex_array::EmptyArrayData
+
+pub type vortex_array::arrays::Reversed::ValidityVTable = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::append_to_builder(vortex_array::ArrayView<'_, Self>, &mut dyn vortex_array::builders::ArrayBuilder, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<()>
+
+pub fn vortex_array::arrays::Reversed::buffer(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::buffer::BufferHandle
+
+pub fn vortex_array::arrays::Reversed::buffer_name(vortex_array::ArrayView<'_, Self>, usize) -> core::option::Option<alloc::string::String>
+
+pub fn vortex_array::arrays::Reversed::child(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::ArrayRef
+
+pub fn vortex_array::arrays::Reversed::child_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::deserialize(&self, &vortex_array::dtype::DType, usize, &[u8], &[vortex_array::buffer::BufferHandle], &dyn vortex_array::serde::ArrayChildren, &vortex_session::VortexSession) -> vortex_error::VortexResult<vortex_array::ArrayParts<Self>>
+
+pub fn vortex_array::arrays::Reversed::execute(vortex_array::Array<Self>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::ExecutionResult>
+
+pub fn vortex_array::arrays::Reversed::execute_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::id(&self) -> vortex_array::ArrayId
+
+pub fn vortex_array::arrays::Reversed::nbuffers(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::nchildren(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::reduce(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::reduce_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::serialize(vortex_array::ArrayView<'_, Self>, &vortex_session::VortexSession) -> vortex_error::VortexResult<core::option::Option<alloc::vec::Vec<u8>>>
+
+pub fn vortex_array::arrays::Reversed::slot_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::validate(&self, &Self::TypedArrayData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
+
+impl vortex_array::ValidityVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::validity(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>) -> vortex_error::VortexResult<vortex_array::validity::Validity>
+
 pub struct vortex_array::arrays::ScalarFn
 
 impl core::clone::Clone for vortex_array::arrays::scalar_fn::ScalarFn
@@ -7039,6 +7215,8 @@ pub type vortex_array::arrays::NullArray = vortex_array::Array<vortex_array::arr
 pub type vortex_array::arrays::PatchedArray = vortex_array::Array<vortex_array::arrays::patched::Patched>
 
 pub type vortex_array::arrays::PrimitiveArray = vortex_array::Array<vortex_array::arrays::Primitive>
+
+pub type vortex_array::arrays::ReversedArray = vortex_array::Array<vortex_array::arrays::Reversed>
 
 pub type vortex_array::arrays::ScalarFnArray = vortex_array::Array<vortex_array::arrays::scalar_fn::ScalarFn>
 
@@ -13660,6 +13838,12 @@ pub type vortex_array::arrays::primitive::PrimitiveMaskedValidityRule::Parent = 
 
 pub fn vortex_array::arrays::primitive::PrimitiveMaskedValidityRule::reduce_parent(&self, vortex_array::ArrayView<'_, vortex_array::arrays::Primitive>, vortex_array::ArrayView<'_, vortex_array::arrays::Masked>, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
+impl<V: vortex_array::arrays::reversed::ReverseReduce> vortex_array::optimizer::rules::ArrayParentReduceRule<V> for vortex_array::arrays::reversed::ReverseReduceAdaptor<V>
+
+pub type vortex_array::arrays::reversed::ReverseReduceAdaptor<V>::Parent = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::reversed::ReverseReduceAdaptor<V>::reduce_parent(&self, vortex_array::ArrayView<'_, V>, <Self::Parent as vortex_array::matcher::Matcher>::Match, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
 impl<V> vortex_array::optimizer::rules::ArrayParentReduceRule<V> for vortex_array::arrays::dict::TakeReduceAdaptor<V> where V: vortex_array::arrays::dict::TakeReduce
 
 pub type vortex_array::arrays::dict::TakeReduceAdaptor<V>::Parent = vortex_array::arrays::dict::Dict
@@ -20244,6 +20428,46 @@ pub fn vortex_array::arrays::Primitive::slot_name(vortex_array::ArrayView<'_, Se
 
 pub fn vortex_array::arrays::Primitive::validate(&self, &vortex_array::arrays::primitive::PrimitiveData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
 
+impl vortex_array::VTable for vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::OperationsVTable = vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::TypedArrayData = vortex_array::EmptyArrayData
+
+pub type vortex_array::arrays::Reversed::ValidityVTable = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::append_to_builder(vortex_array::ArrayView<'_, Self>, &mut dyn vortex_array::builders::ArrayBuilder, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<()>
+
+pub fn vortex_array::arrays::Reversed::buffer(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::buffer::BufferHandle
+
+pub fn vortex_array::arrays::Reversed::buffer_name(vortex_array::ArrayView<'_, Self>, usize) -> core::option::Option<alloc::string::String>
+
+pub fn vortex_array::arrays::Reversed::child(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::ArrayRef
+
+pub fn vortex_array::arrays::Reversed::child_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::deserialize(&self, &vortex_array::dtype::DType, usize, &[u8], &[vortex_array::buffer::BufferHandle], &dyn vortex_array::serde::ArrayChildren, &vortex_session::VortexSession) -> vortex_error::VortexResult<vortex_array::ArrayParts<Self>>
+
+pub fn vortex_array::arrays::Reversed::execute(vortex_array::Array<Self>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::ExecutionResult>
+
+pub fn vortex_array::arrays::Reversed::execute_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::id(&self) -> vortex_array::ArrayId
+
+pub fn vortex_array::arrays::Reversed::nbuffers(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::nchildren(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::reduce(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::reduce_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::serialize(vortex_array::ArrayView<'_, Self>, &vortex_session::VortexSession) -> vortex_error::VortexResult<core::option::Option<alloc::vec::Vec<u8>>>
+
+pub fn vortex_array::arrays::Reversed::slot_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::validate(&self, &Self::TypedArrayData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
+
 impl vortex_array::VTable for vortex_array::arrays::Shared
 
 pub type vortex_array::arrays::Shared::OperationsVTable = vortex_array::arrays::Shared
@@ -20691,6 +20915,10 @@ pub fn vortex_array::arrays::Masked::scalar_at(vortex_array::ArrayView<'_, vorte
 impl vortex_array::OperationsVTable<vortex_array::arrays::Primitive> for vortex_array::arrays::Primitive
 
 pub fn vortex_array::arrays::Primitive::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Primitive>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
+
+impl vortex_array::OperationsVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
 
 impl vortex_array::OperationsVTable<vortex_array::arrays::Shared> for vortex_array::arrays::Shared
 
@@ -21216,6 +21444,46 @@ pub fn vortex_array::arrays::Primitive::slot_name(vortex_array::ArrayView<'_, Se
 
 pub fn vortex_array::arrays::Primitive::validate(&self, &vortex_array::arrays::primitive::PrimitiveData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
 
+impl vortex_array::VTable for vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::OperationsVTable = vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::TypedArrayData = vortex_array::EmptyArrayData
+
+pub type vortex_array::arrays::Reversed::ValidityVTable = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::append_to_builder(vortex_array::ArrayView<'_, Self>, &mut dyn vortex_array::builders::ArrayBuilder, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<()>
+
+pub fn vortex_array::arrays::Reversed::buffer(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::buffer::BufferHandle
+
+pub fn vortex_array::arrays::Reversed::buffer_name(vortex_array::ArrayView<'_, Self>, usize) -> core::option::Option<alloc::string::String>
+
+pub fn vortex_array::arrays::Reversed::child(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::ArrayRef
+
+pub fn vortex_array::arrays::Reversed::child_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::deserialize(&self, &vortex_array::dtype::DType, usize, &[u8], &[vortex_array::buffer::BufferHandle], &dyn vortex_array::serde::ArrayChildren, &vortex_session::VortexSession) -> vortex_error::VortexResult<vortex_array::ArrayParts<Self>>
+
+pub fn vortex_array::arrays::Reversed::execute(vortex_array::Array<Self>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::ExecutionResult>
+
+pub fn vortex_array::arrays::Reversed::execute_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::id(&self) -> vortex_array::ArrayId
+
+pub fn vortex_array::arrays::Reversed::nbuffers(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::nchildren(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::reduce(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::reduce_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::serialize(vortex_array::ArrayView<'_, Self>, &vortex_session::VortexSession) -> vortex_error::VortexResult<core::option::Option<alloc::vec::Vec<u8>>>
+
+pub fn vortex_array::arrays::Reversed::slot_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::validate(&self, &Self::TypedArrayData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
+
 impl vortex_array::VTable for vortex_array::arrays::Shared
 
 pub type vortex_array::arrays::Shared::OperationsVTable = vortex_array::arrays::Shared
@@ -21677,6 +21945,10 @@ pub fn vortex_array::arrays::Masked::validity(vortex_array::ArrayView<'_, vortex
 impl vortex_array::ValidityVTable<vortex_array::arrays::Primitive> for vortex_array::arrays::Primitive
 
 pub fn vortex_array::arrays::Primitive::validity(vortex_array::ArrayView<'_, vortex_array::arrays::Primitive>) -> vortex_error::VortexResult<vortex_array::validity::Validity>
+
+impl vortex_array::ValidityVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::validity(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>) -> vortex_error::VortexResult<vortex_array::validity::Validity>
 
 impl vortex_array::ValidityVTable<vortex_array::arrays::Shared> for vortex_array::arrays::Shared
 
@@ -22140,6 +22412,14 @@ impl vortex_array::Array<vortex_array::arrays::Primitive>
 
 pub fn vortex_array::Array<vortex_array::arrays::Primitive>::top_value(&self) -> vortex_error::VortexResult<core::option::Option<(vortex_array::scalar::PValue, usize)>>
 
+impl vortex_array::Array<vortex_array::arrays::Reversed>
+
+pub fn vortex_array::Array<vortex_array::arrays::Reversed>::new(vortex_array::ArrayRef) -> Self
+
+pub unsafe fn vortex_array::Array<vortex_array::arrays::Reversed>::new_unchecked(vortex_array::ArrayRef) -> Self
+
+pub fn vortex_array::Array<vortex_array::arrays::Reversed>::try_new(vortex_array::ArrayRef) -> vortex_error::VortexResult<Self>
+
 impl vortex_array::Array<vortex_array::arrays::Shared>
 
 pub fn vortex_array::Array<vortex_array::arrays::Shared>::new(vortex_array::ArrayRef) -> Self
@@ -22537,6 +22817,8 @@ pub fn vortex_array::ArrayRef::nth_child(&self, usize) -> core::option::Option<v
 pub fn vortex_array::ArrayRef::reduce(&self) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
 
 pub fn vortex_array::ArrayRef::reduce_parent(&self, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::ArrayRef::reverse(&self) -> vortex_error::VortexResult<vortex_array::ArrayRef>
 
 pub fn vortex_array::ArrayRef::scalar_at(&self, usize) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
 
@@ -23916,6 +24198,46 @@ pub fn vortex_array::arrays::Primitive::slot_name(vortex_array::ArrayView<'_, Se
 
 pub fn vortex_array::arrays::Primitive::validate(&self, &vortex_array::arrays::primitive::PrimitiveData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
 
+impl vortex_array::VTable for vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::OperationsVTable = vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::TypedArrayData = vortex_array::EmptyArrayData
+
+pub type vortex_array::arrays::Reversed::ValidityVTable = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::append_to_builder(vortex_array::ArrayView<'_, Self>, &mut dyn vortex_array::builders::ArrayBuilder, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<()>
+
+pub fn vortex_array::arrays::Reversed::buffer(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::buffer::BufferHandle
+
+pub fn vortex_array::arrays::Reversed::buffer_name(vortex_array::ArrayView<'_, Self>, usize) -> core::option::Option<alloc::string::String>
+
+pub fn vortex_array::arrays::Reversed::child(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::ArrayRef
+
+pub fn vortex_array::arrays::Reversed::child_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::deserialize(&self, &vortex_array::dtype::DType, usize, &[u8], &[vortex_array::buffer::BufferHandle], &dyn vortex_array::serde::ArrayChildren, &vortex_session::VortexSession) -> vortex_error::VortexResult<vortex_array::ArrayParts<Self>>
+
+pub fn vortex_array::arrays::Reversed::execute(vortex_array::Array<Self>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::ExecutionResult>
+
+pub fn vortex_array::arrays::Reversed::execute_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::id(&self) -> vortex_array::ArrayId
+
+pub fn vortex_array::arrays::Reversed::nbuffers(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::nchildren(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::reduce(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::reduce_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::serialize(vortex_array::ArrayView<'_, Self>, &vortex_session::VortexSession) -> vortex_error::VortexResult<core::option::Option<alloc::vec::Vec<u8>>>
+
+pub fn vortex_array::arrays::Reversed::slot_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::validate(&self, &Self::TypedArrayData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
+
 impl vortex_array::VTable for vortex_array::arrays::Shared
 
 pub type vortex_array::arrays::Shared::OperationsVTable = vortex_array::arrays::Shared
@@ -24544,6 +24866,10 @@ impl vortex_array::OperationsVTable<vortex_array::arrays::Primitive> for vortex_
 
 pub fn vortex_array::arrays::Primitive::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Primitive>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
 
+impl vortex_array::OperationsVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
+
 impl vortex_array::OperationsVTable<vortex_array::arrays::Shared> for vortex_array::arrays::Shared
 
 pub fn vortex_array::arrays::Shared::scalar_at(vortex_array::ArrayView<'_, vortex_array::arrays::Shared>, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
@@ -25136,6 +25462,46 @@ pub fn vortex_array::arrays::Primitive::slot_name(vortex_array::ArrayView<'_, Se
 
 pub fn vortex_array::arrays::Primitive::validate(&self, &vortex_array::arrays::primitive::PrimitiveData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
 
+impl vortex_array::VTable for vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::OperationsVTable = vortex_array::arrays::Reversed
+
+pub type vortex_array::arrays::Reversed::TypedArrayData = vortex_array::EmptyArrayData
+
+pub type vortex_array::arrays::Reversed::ValidityVTable = vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::append_to_builder(vortex_array::ArrayView<'_, Self>, &mut dyn vortex_array::builders::ArrayBuilder, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<()>
+
+pub fn vortex_array::arrays::Reversed::buffer(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::buffer::BufferHandle
+
+pub fn vortex_array::arrays::Reversed::buffer_name(vortex_array::ArrayView<'_, Self>, usize) -> core::option::Option<alloc::string::String>
+
+pub fn vortex_array::arrays::Reversed::child(vortex_array::ArrayView<'_, Self>, usize) -> vortex_array::ArrayRef
+
+pub fn vortex_array::arrays::Reversed::child_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::deserialize(&self, &vortex_array::dtype::DType, usize, &[u8], &[vortex_array::buffer::BufferHandle], &dyn vortex_array::serde::ArrayChildren, &vortex_session::VortexSession) -> vortex_error::VortexResult<vortex_array::ArrayParts<Self>>
+
+pub fn vortex_array::arrays::Reversed::execute(vortex_array::Array<Self>, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<vortex_array::ExecutionResult>
+
+pub fn vortex_array::arrays::Reversed::execute_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize, &mut vortex_array::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::id(&self) -> vortex_array::ArrayId
+
+pub fn vortex_array::arrays::Reversed::nbuffers(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::nchildren(vortex_array::ArrayView<'_, Self>) -> usize
+
+pub fn vortex_array::arrays::Reversed::reduce(vortex_array::ArrayView<'_, Self>) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::reduce_parent(vortex_array::ArrayView<'_, Self>, &vortex_array::ArrayRef, usize) -> vortex_error::VortexResult<core::option::Option<vortex_array::ArrayRef>>
+
+pub fn vortex_array::arrays::Reversed::serialize(vortex_array::ArrayView<'_, Self>, &vortex_session::VortexSession) -> vortex_error::VortexResult<core::option::Option<alloc::vec::Vec<u8>>>
+
+pub fn vortex_array::arrays::Reversed::slot_name(vortex_array::ArrayView<'_, Self>, usize) -> alloc::string::String
+
+pub fn vortex_array::arrays::Reversed::validate(&self, &Self::TypedArrayData, &vortex_array::dtype::DType, usize, &[core::option::Option<vortex_array::ArrayRef>]) -> vortex_error::VortexResult<()>
+
 impl vortex_array::VTable for vortex_array::arrays::Shared
 
 pub type vortex_array::arrays::Shared::OperationsVTable = vortex_array::arrays::Shared
@@ -25597,6 +25963,10 @@ pub fn vortex_array::arrays::Masked::validity(vortex_array::ArrayView<'_, vortex
 impl vortex_array::ValidityVTable<vortex_array::arrays::Primitive> for vortex_array::arrays::Primitive
 
 pub fn vortex_array::arrays::Primitive::validity(vortex_array::ArrayView<'_, vortex_array::arrays::Primitive>) -> vortex_error::VortexResult<vortex_array::validity::Validity>
+
+impl vortex_array::ValidityVTable<vortex_array::arrays::Reversed> for vortex_array::arrays::Reversed
+
+pub fn vortex_array::arrays::Reversed::validity(vortex_array::ArrayView<'_, vortex_array::arrays::Reversed>) -> vortex_error::VortexResult<vortex_array::validity::Validity>
 
 impl vortex_array::ValidityVTable<vortex_array::arrays::Shared> for vortex_array::arrays::Shared
 
