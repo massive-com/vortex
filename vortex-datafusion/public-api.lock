@@ -190,6 +190,8 @@ pub fn vortex_datafusion::VortexSource::new(table_schema: datafusion_datasource:
 
 pub fn vortex_datafusion::VortexSource::options(&self) -> &vortex_datafusion::VortexTableOptions
 
+pub fn vortex_datafusion::VortexSource::reversed(&self) -> bool
+
 pub fn vortex_datafusion::VortexSource::with_expression_convertor(self, expr_convertor: alloc::sync::Arc<dyn vortex_datafusion::ExpressionConvertor>) -> Self
 
 pub fn vortex_datafusion::VortexSource::with_file_metadata_cache(self, file_metadata_cache: alloc::sync::Arc<dyn datafusion_execution::cache::cache_manager::FileMetadataCache>) -> Self
@@ -197,6 +199,8 @@ pub fn vortex_datafusion::VortexSource::with_file_metadata_cache(self, file_meta
 pub fn vortex_datafusion::VortexSource::with_options(self, opts: vortex_datafusion::VortexTableOptions) -> Self
 
 pub fn vortex_datafusion::VortexSource::with_projection_pushdown(self, enabled: bool) -> Self
+
+pub fn vortex_datafusion::VortexSource::with_reversed(self, reversed: bool) -> Self
 
 pub fn vortex_datafusion::VortexSource::with_scan_concurrency(self, scan_concurrency: usize) -> Self
 
@@ -231,6 +235,8 @@ pub fn vortex_datafusion::VortexSource::table_schema(&self) -> &datafusion_datas
 pub fn vortex_datafusion::VortexSource::try_pushdown_filters(&self, filters: alloc::vec::Vec<alloc::sync::Arc<dyn datafusion_physical_expr_common::physical_expr::PhysicalExpr>>, _config: &datafusion_common::config::ConfigOptions) -> datafusion_common::error::Result<datafusion_physical_plan::filter_pushdown::FilterPushdownPropagation<alloc::sync::Arc<dyn datafusion_datasource::file::FileSource>>>
 
 pub fn vortex_datafusion::VortexSource::try_pushdown_projection(&self, projection: &datafusion_physical_expr::projection::ProjectionExprs) -> datafusion_common::error::Result<core::option::Option<alloc::sync::Arc<dyn datafusion_datasource::file::FileSource>>>
+
+pub fn vortex_datafusion::VortexSource::try_reverse_output(&self, order: &[datafusion_physical_expr_common::sort_expr::PhysicalSortExpr], eq_properties: &datafusion_physical_expr::equivalence::properties::EquivalenceProperties) -> datafusion_common::error::Result<datafusion_physical_plan::sort_pushdown::SortOrderPushdownResult<alloc::sync::Arc<dyn datafusion_datasource::file::FileSource>>>
 
 pub fn vortex_datafusion::VortexSource::with_batch_size(&self, batch_size: usize) -> alloc::sync::Arc<dyn datafusion_datasource::file::FileSource>
 

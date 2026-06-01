@@ -5,6 +5,8 @@ use std::cmp;
 use std::iter;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use futures::Stream;
 use futures::future::BoxFuture;
@@ -168,7 +170,10 @@ impl<A: 'static + Send> RepeatedScan<A> {
             }),
         };
 
-        let mut limit = self.limit;
+        // Promote the scalar limit to a shared atomic counter so that the limit can be applied
+        // safely across both the synchronous no-filter path and the asynchronous filter path.
+        // All tasks share this counter and reserve from it atomically.
+        let limit = self.limit.map(|l| Arc::new(AtomicU64::new(l)));
         let mut tasks = Vec::new();
 
         let ranges = if self.reversed {
@@ -182,11 +187,17 @@ impl<A: 'static + Send> RepeatedScan<A> {
                 continue;
             }
 
-            if limit.is_some_and(|l| l == 0) {
+            // The counter only ever decreases, so if a previous split has already drained it
+            // we can stop building tasks. Splits whose IO is already in flight will still
+            // observe the empty counter and short-circuit.
+            if limit
+                .as_ref()
+                .is_some_and(|l| l.load(Ordering::Acquire) == 0)
+            {
                 break;
             }
 
-            tasks.push(split_exec(ctx.clone(), range, limit.as_mut())?);
+            tasks.push(split_exec(ctx.clone(), range, limit.clone())?);
         }
 
         Ok(tasks)
