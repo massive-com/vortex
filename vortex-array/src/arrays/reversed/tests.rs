@@ -14,6 +14,7 @@ use crate::arrays::Dict;
 use crate::arrays::PrimitiveArray;
 use crate::arrays::Reversed;
 use crate::arrays::StructArray;
+use crate::arrays::struct_::StructArrayExt;
 use crate::assert_arrays_eq;
 use crate::builders::dict::dict_encode;
 use crate::dtype::DType;

@@ -11,6 +11,8 @@ use crate::IntoArray as _;
 use crate::arrays::BoolArray;
 use crate::arrays::PrimitiveArray;
 use crate::arrays::StructArray;
+use crate::arrays::bool::BoolArrayExt;
+use crate::arrays::struct_::StructArrayExt;
 use crate::executor::ExecutionCtx;
 use crate::match_each_native_ptype;
 use crate::validity::Validity;

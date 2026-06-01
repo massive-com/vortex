@@ -5,8 +5,10 @@ use vortex_error::VortexResult;
 
 use crate::ArrayRef;
 use crate::IntoArray as _;
+use crate::array::ArrayView;
 use crate::arrays::Dict;
 use crate::arrays::DictArray;
+use crate::arrays::dict::DictArraySlotsExt;
 use crate::arrays::reversed::ReverseReduce;
 
 /// Reverses a `DictArray` by reversing only the codes array.
@@ -19,7 +21,7 @@ use crate::arrays::reversed::ReverseReduce;
 /// For `Dict(codes=[2,2,1,1,0,0], values=[A, B, C])` → decoded `[C,C,B,B,A,A]`:
 /// `Dict(codes=[0,0,1,1,2,2], values=[A, B, C])` → decoded `[A,A,B,B,C,C]` ✓
 impl ReverseReduce for Dict {
-    fn reverse(array: &DictArray) -> VortexResult<Option<ArrayRef>> {
+    fn reverse(array: ArrayView<'_, Dict>) -> VortexResult<Option<ArrayRef>> {
         let reversed_codes = array.codes().reverse()?;
         // SAFETY: reversing codes doesn't change the dict invariants; the values
         // dictionary is untouched and all code indices remain valid.
