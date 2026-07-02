@@ -34,6 +34,7 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::stream;
 use itertools::Itertools;
+use object_store::ObjectMeta;
 use object_store::path::Path;
 use tracing::Instrument;
 use vortex::array::VortexSessionExecute;
@@ -46,6 +47,9 @@ use vortex::io::InstrumentedReadAt;
 use vortex::layout::LayoutReader;
 use vortex::layout::scan::scan_builder::ScanBuilder;
 use vortex::layout::scan::split_by::SplitBy;
+use vortex::layout::segments::FileIdentity;
+use vortex::layout::segments::FileVersion;
+use vortex::layout::segments::SegmentCacheBuilder;
 use vortex::metrics::Label;
 use vortex::metrics::MetricsRegistry;
 use vortex::session::VortexSession;
@@ -101,9 +105,12 @@ pub(crate) struct VortexOpener {
 
     pub expression_convertor: Arc<dyn ExpressionConvertor>,
     pub file_metadata_cache: Option<Arc<dyn FileMetadataCache>>,
+    pub segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Whether to enable expression pushdown into the underlying Vortex scan.
     pub projection_pushdown: bool,
     pub scan_concurrency: Option<usize>,
+    /// Whether the scan should yield rows in reverse file order.
+    pub reversed: bool,
 }
 
 impl FileOpener for VortexOpener {
@@ -126,6 +133,7 @@ impl FileOpener for VortexOpener {
         let file_pruning_predicate = self.file_pruning_predicate.clone();
         let expr_adapter_factory = Arc::clone(&self.expr_adapter_factory);
         let file_metadata_cache = self.file_metadata_cache.clone();
+        let segment_cache_builder = self.segment_cache_builder.clone();
 
         let unified_file_schema = Arc::clone(self.table_schema.file_schema());
         let batch_size = self.batch_size;
@@ -137,6 +145,7 @@ impl FileOpener for VortexOpener {
 
         let expr_convertor = Arc::clone(&self.expression_convertor);
         let projection_pushdown = self.projection_pushdown;
+        let reversed = self.reversed;
 
         // Replace column access for partition columns with literals
         #[expect(clippy::disallowed_types)]
@@ -206,6 +215,11 @@ impl FileOpener for VortexOpener {
 
             if let Some(footer) = cached_footer {
                 open_opts = open_opts.with_footer(footer);
+            }
+
+            if let Some(builder) = segment_cache_builder {
+                let identity = file_identity(&file.object_meta);
+                open_opts = open_opts.with_segment_cache(builder.cache_for(&identity));
             }
 
             let vxf = open_opts
@@ -330,7 +344,8 @@ impl FileOpener for VortexOpener {
                 }
             };
 
-            let mut scan_builder = ScanBuilder::new(session.clone(), Arc::clone(&layout_reader));
+            let mut scan_builder = ScanBuilder::new(session.clone(), Arc::clone(&layout_reader))
+                .with_reversed(reversed);
 
             if let Some(vortex_plan) = file.extensions.get::<VortexAccessPlan>() {
                 scan_builder = vortex_plan.apply_to_builder(scan_builder);
@@ -396,9 +411,7 @@ impl FileOpener for VortexOpener {
                 })
                 .transpose()?;
 
-            if let Some(limit) = limit
-                && filter.is_none()
-            {
+            if let Some(limit) = limit {
                 scan_builder = scan_builder.with_limit(limit);
             }
 
@@ -470,6 +483,18 @@ impl FileOpener for VortexOpener {
         .in_current_span()
         .boxed())
     }
+}
+
+/// Build a [`FileIdentity`] from object store metadata, preferring the etag and falling
+/// back to `(size, last_modified)` when no etag is available.
+fn file_identity(meta: &ObjectMeta) -> FileIdentity {
+    let path = Arc::from(meta.location.as_ref());
+    let version = if let Some(etag) = meta.e_tag.as_deref() {
+        FileVersion::Etag(Arc::from(etag))
+    } else {
+        FileVersion::SizeMtime(meta.size, meta.last_modified.timestamp())
+    };
+    FileIdentity { path, version }
 }
 
 fn natural_split_ranges_for_file(
@@ -708,8 +733,10 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         }
     }
 
@@ -880,8 +907,10 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         let filter = col("a").lt(lit(100_i32));
@@ -967,8 +996,10 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         let stream = opener.open(file)?.await?;
@@ -1124,8 +1155,10 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         // This should succeed and return the correctly projected and cast data
@@ -1184,8 +1217,10 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         }
     }
 
@@ -1393,8 +1428,10 @@ mod tests {
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
             file_metadata_cache: None,
+            segment_cache_builder: None,
             projection_pushdown: false,
             scan_concurrency: None,
+            reversed: false,
         };
 
         let file = PartitionedFile::new(file_path.to_string(), data_size);

@@ -41,6 +41,7 @@ use crate::arrays::DictArray;
 use crate::arrays::FilterArray;
 use crate::arrays::Null;
 use crate::arrays::Primitive;
+use crate::arrays::ReversedArray;
 use crate::arrays::SliceArray;
 use crate::arrays::VarBin;
 use crate::arrays::VarBinView;
@@ -260,6 +261,15 @@ impl ArrayRef {
     /// Wraps the array in a [`DictArray`] such that it is logically taken by the given indices.
     pub fn take(&self, indices: ArrayRef) -> VortexResult<ArrayRef> {
         DictArray::try_new(indices, self.clone())?
+            .into_array()
+            .optimize()
+    }
+
+    /// Wraps the array in a [`ReversedArray`](crate::arrays::ReversedArray) such that it is
+    /// logically yielded in reverse element order. The optimizer is run immediately, which may
+    /// eliminate the wrapper (for example, for `Reversed(Reversed(x))` or `Reversed(Dict(...))`).
+    pub fn reverse(&self) -> VortexResult<ArrayRef> {
+        ReversedArray::try_new(self.clone())?
             .into_array()
             .optimize()
     }

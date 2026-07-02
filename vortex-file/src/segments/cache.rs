@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use vortex_buffer::ByteBuffer;
 use vortex_error::VortexResult;
 use vortex_layout::segments::SegmentCache;
 use vortex_layout::segments::SegmentId;
+use vortex_layout::segments::SharedSegmentCache;
 use vortex_utils::aliases::hash_map::HashMap;
 
 /// Segment cache containing the initial read segments.
@@ -16,7 +15,7 @@ pub struct InitialReadSegmentCache {
     /// Segments that were already covered by the footer initial read.
     pub initial: RwLock<HashMap<SegmentId, ByteBuffer>>,
     /// Delegate cache used for all misses and stores.
-    pub fallback: Arc<dyn SegmentCache>,
+    pub fallback: SharedSegmentCache,
 }
 
 #[async_trait]
