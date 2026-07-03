@@ -2159,7 +2159,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-schema 58.3.0",
@@ -2263,7 +2263,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
@@ -2310,7 +2310,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog-listing"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
@@ -2355,7 +2355,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-ipc 58.3.0",
@@ -2391,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "futures",
  "log",
@@ -2430,7 +2430,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-compression",
@@ -2489,7 +2489,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-arrow"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-ipc 58.3.0",
@@ -2512,7 +2512,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-avro"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-avro",
@@ -2553,7 +2553,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-csv"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
@@ -2599,7 +2599,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-json"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
@@ -2621,7 +2621,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-parquet"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
@@ -2657,7 +2657,7 @@ checksum = "8de6ac0df1662b9148ad3c987978b32cbec7c772f199b1d53520c8fa764a87ee"
 [[package]]
 name = "datafusion-doc"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 
 [[package]]
 name = "datafusion-execution"
@@ -2685,7 +2685,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-buffer 58.3.0",
@@ -2728,7 +2728,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-schema 58.3.0",
@@ -2763,7 +2763,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr-common"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -2806,7 +2806,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-buffer 58.3.0",
@@ -2859,7 +2859,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -2892,7 +2892,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate-common"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -2928,7 +2928,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-nested"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-ord 58.3.0",
@@ -2968,7 +2968,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-table"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
@@ -3001,7 +3001,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -3027,7 +3027,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window-common"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "datafusion-common 54.0.0",
  "datafusion-physical-expr-common 54.0.0",
@@ -3047,7 +3047,7 @@ dependencies = [
 [[package]]
 name = "datafusion-macros"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "datafusion-doc 54.0.0",
  "quote",
@@ -3076,7 +3076,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "chrono",
@@ -3118,7 +3118,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -3154,7 +3154,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-adapter"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -3185,7 +3185,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "chrono",
@@ -3219,7 +3219,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-optimizer"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -3269,7 +3269,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "arrow-data 58.3.0",
@@ -3318,7 +3318,7 @@ dependencies = [
 [[package]]
 name = "datafusion-pruning"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "datafusion-common 54.0.0",
@@ -3347,7 +3347,7 @@ dependencies = [
 [[package]]
 name = "datafusion-session"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "async-trait",
  "datafusion-common 54.0.0",
@@ -3360,7 +3360,7 @@ dependencies = [
 [[package]]
 name = "datafusion-spark"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "bigdecimal",
@@ -3407,7 +3407,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "bigdecimal",
@@ -3425,7 +3425,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sqllogictest"
 version = "54.0.0"
-source = "git+https://github.com/massive-com/arrow-datafusion?rev=ceac7244e6b30f69f6d0f81627bc728499e5864c#ceac7244e6b30f69f6d0f81627bc728499e5864c"
+source = "git+https://github.com/massive-com/arrow-datafusion?rev=7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd#7955f7ca8c851ec5298b2a9e2f9db04a39e8cbcd"
 dependencies = [
  "arrow 58.3.0",
  "async-trait",
