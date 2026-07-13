@@ -108,6 +108,10 @@ jobs:
           sccache: s3
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
       - uses: ./.github/actions/setup-prebuild
+      # doxygen is preinstalled on the prebuilt images; install it for forks.
+      - name: Install Doxygen
+        if: github.repository == 'massive-com/vortex'
+        uses: ssciwr/doxygen-install@329d88f5a303066a5bd006db7516b1925b86350e  # v2
 
       - name: Pytest - Vortex
         run: |
