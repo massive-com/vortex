@@ -137,7 +137,9 @@ cudarc = { version = "0.19.0", features = [
 ] }
 custom-labels = "0.4.4"
 dashmap = "6.1.0"
-datafusion = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949", default-features = false, features = ["sql"] }
+datafusion = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949", default-features = false, features = [
+    "sql",
+] }
 datafusion-catalog = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
 datafusion-common = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
 datafusion-common-runtime = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
