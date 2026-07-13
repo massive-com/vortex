@@ -533,6 +533,9 @@ jobs:
           sccache: s3
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
       - uses: ./.github/actions/setup-prebuild
+      # flatc is preinstalled on the prebuilt images; install it for forks.
+      - uses: ./.github/actions/setup-flatc
+        if: github.repository == 'massive-com/vortex'
       - name: Install nightly for cbindgen macro expansion
         run: rustup toolchain install $NIGHTLY_TOOLCHAIN
       - name: "regenerate all .fbs/.proto Rust code"
