@@ -55,13 +55,9 @@ impl VTable for Reversed {
         len: usize,
         slots: &[Option<ArrayRef>],
     ) -> VortexResult<()> {
-        vortex_ensure!(
-            slots[CHILD_SLOT].is_some(),
-            "ReversedArray child slot must be present"
-        );
-        let child = slots[CHILD_SLOT]
-            .as_ref()
-            .expect("validated child slot presence");
+        let Some(child) = slots[CHILD_SLOT].as_ref() else {
+            vortex_bail!("ReversedArray child slot must be present");
+        };
         vortex_ensure!(
             child.dtype() == dtype,
             "ReversedArray dtype {} does not match child dtype {}",
