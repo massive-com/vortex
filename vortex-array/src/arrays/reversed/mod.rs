@@ -15,7 +15,7 @@
 //!   dictionary-encoded, so the per-chunk reversal cost is O(n_codes) rather than O(n_rows).
 //!
 //! For encodings that have no reduce rule the `ReversedArray` wrapper survives to
-//! decode time, where [`execute.rs`](self::execute) reverses the canonical form
+//! decode time, where `execute.rs` reverses the canonical form
 //! directly:
 //!
 //! * `Primitive`: iterates the typed buffer backwards — O(n), fully sequential.

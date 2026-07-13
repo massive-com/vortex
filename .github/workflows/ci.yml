@@ -114,10 +114,13 @@ jobs:
           uv run --all-packages pytest --benchmark-disable -n auto test/
         working-directory: vortex-python/
 
+      # Benchmark tuning requires the self-hosted prebuilt runner; skip on forks.
       - name: Setup benchmark environment
+        if: github.repository == 'vortex-data/vortex'
         run: sudo bash scripts/setup-benchmark.sh
 
       - name: Pytest Benchmarks - Vortex
+        if: github.repository == 'vortex-data/vortex'
         run: |
           bash ../scripts/bench-taskset.sh uv run --all-packages pytest --benchmark-only benchmark/
         working-directory: vortex-python/

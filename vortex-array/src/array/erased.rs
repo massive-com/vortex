@@ -265,7 +265,7 @@ impl ArrayRef {
             .optimize()
     }
 
-    /// Wraps the array in a [`ReversedArray`](crate::arrays::ReversedArray) such that it is
+    /// Wraps the array in a [`ReversedArray`] such that it is
     /// logically yielded in reverse element order. The optimizer is run immediately, which may
     /// eliminate the wrapper (for example, for `Reversed(Reversed(x))` or `Reversed(Dict(...))`).
     pub fn reverse(&self) -> VortexResult<ArrayRef> {
