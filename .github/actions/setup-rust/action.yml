@@ -80,6 +80,11 @@ runs:
       shell: bash
       run: sccache --start-server
 
+    - name: Install cargo tools (cargo-hack, cargo-nextest, cargo-minimal-versions)
+      uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9  # v2
+      with:
+        tool: cargo-hack,cargo-nextest,cargo-minimal-versions
+
     - name: Install Protoc (for lance-encoding build step)
       if: runner.os != 'Windows'
       uses: ./.github/actions/setup-protoc
