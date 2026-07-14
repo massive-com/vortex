@@ -44,7 +44,8 @@ jobs:
   rust-coverage:
     name: "Rust tests (coverage) (${{ matrix.suite }})"
     needs: duckdb-ready
-    timeout-minutes: 30
+    # Forks build instrumented without sccache; give the uncached run more headroom.
+    timeout-minutes: ${{ github.repository == 'vortex-data/vortex' && 30 || 90 }}
     permissions:
       id-token: write
     strategy:
@@ -130,7 +131,8 @@ jobs:
       ${{ github.repository == 'vortex-data/vortex'
           && format('runs-on={0}/pool=amd64-medium-pre-v2/tag=rust-test-sanitizer', github.run_id)
           || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    # Forks build instrumented without sccache; give the uncached run more headroom.
+    timeout-minutes: ${{ github.repository == 'vortex-data/vortex' && 30 || 90 }}
     env:
       ASAN_OPTIONS: "symbolize=1:check_initialization_order=1:detect_leaks=1:leak_check_at_exit=1"
       LSAN_OPTIONS: "report_objects=1"

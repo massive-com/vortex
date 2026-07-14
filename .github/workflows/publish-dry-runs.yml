@@ -24,6 +24,9 @@ env:
 jobs:
   python-wheel-build:
     name: "Python (wheel build)"
+    # Publish validation is upstream-only (git deps are unpublishable, and some
+    # jobs require the upstream self-hosted runners); skip on forks.
+    if: github.repository == 'vortex-data/vortex'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -64,6 +67,7 @@ jobs:
         working-directory: vortex-python/
 
   check-java-publish-build:
+    if: github.repository == 'vortex-data/vortex'
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -96,12 +100,14 @@ jobs:
 
   compat-check:
     name: "Compat check"
+    if: github.repository == 'vortex-data/vortex'
     uses: ./.github/workflows/compat-validation.yml
     with:
       mode: last
 
   rust-publish-dry-run:
     name: "Rust publish dry-run"
+    if: github.repository == 'vortex-data/vortex'
     timeout-minutes: 30
     runs-on: >-
       ${{ github.repository == 'vortex-data/vortex'
