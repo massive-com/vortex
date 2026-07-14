@@ -156,6 +156,27 @@ jobs:
         run: |
           rustup toolchain install $NIGHTLY_TOOLCHAIN
           rustup component add --toolchain $NIGHTLY_TOOLCHAIN rust-src rustfmt clippy llvm-tools-preview
+      # The prebuilt image ships /usr/bin/llvm-symbolizer; GitHub-hosted runners
+      # do not. Without it TSan/ASan cannot symbolize frames, so the
+      # tsan_suppressions.txt entries (benign crossbeam/oneshot fence races)
+      # never match and fail the job. Symlink an available llvm-symbolizer.
+      - name: Ensure llvm-symbolizer (forks)
+        if: github.repository == 'massive-com/vortex'
+        shell: bash
+        run: |
+          if [ ! -x /usr/bin/llvm-symbolizer ]; then
+            sym="$(command -v llvm-symbolizer \
+              || ls -1 /usr/bin/llvm-symbolizer-* 2>/dev/null | sort -V | tail -1 \
+              || ls -1 /usr/lib/llvm-*/bin/llvm-symbolizer 2>/dev/null | sort -V | tail -1)"
+            if [ -z "$sym" ]; then
+              sudo apt-get update
+              sudo apt-get install -y llvm
+              sym="$(ls -1 /usr/bin/llvm-symbolizer-* 2>/dev/null | sort -V | tail -1 \
+                || ls -1 /usr/lib/llvm-*/bin/llvm-symbolizer 2>/dev/null | sort -V | tail -1)"
+            fi
+            sudo ln -sf "$sym" /usr/bin/llvm-symbolizer
+          fi
+          /usr/bin/llvm-symbolizer --version
       - name: Build tests with sanitizer
         run: |
           RUSTFLAGS="${RUSTFLAGS} ${{ matrix.sanitizer_flags }}" \
