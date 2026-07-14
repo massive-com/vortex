@@ -43,9 +43,12 @@ jobs:
 
   rust-coverage:
     name: "Rust tests (coverage) (${{ matrix.suite }})"
+    # Coverage instruments and runs the whole test suite, which OOMs the
+    # GitHub-hosted runners forks use (upstream runs it on larger self-hosted
+    # runners); it also uploads to Codecov via OIDC that forks lack. Skip on forks.
+    if: github.repository == 'vortex-data/vortex'
     needs: duckdb-ready
-    # Forks build instrumented without sccache; give the uncached run more headroom.
-    timeout-minutes: ${{ github.repository == 'vortex-data/vortex' && 30 || 90 }}
+    timeout-minutes: 30
     permissions:
       id-token: write
     strategy:
