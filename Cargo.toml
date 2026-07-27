@@ -137,23 +137,21 @@ cudarc = { version = "0.19.0", features = [
 ] }
 custom-labels = "0.4.4"
 dashmap = "6.1.0"
-datafusion = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949", default-features = false, features = [
-    "sql",
-] }
-datafusion-catalog = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-common = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-common-runtime = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-datasource = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949", default-features = false }
-datafusion-execution = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-expr = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-functions = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-functions-nested = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-physical-expr = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-physical-expr-adapter = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-physical-expr-common = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-physical-plan = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-pruning = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
-datafusion-sqllogictest = { git = "https://github.com/massive-com/arrow-datafusion", rev = "6363fbeb2a593e78fb6d73ad07ddba13c0406949" }
+datafusion = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681", default-features = false, features = ["sql"] }
+datafusion-catalog = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-common = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-common-runtime = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-datasource = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681", default-features = false }
+datafusion-execution = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-expr = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-functions = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-functions-nested = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-physical-expr = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-physical-expr-adapter = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-physical-expr-common = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-physical-plan = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-pruning = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
+datafusion-sqllogictest = { git = "https://github.com/massive-com/arrow-datafusion", rev = "d5a383f1b497473f2adfecbabc4fbf37efbd5681" }
 dirs = "6.0.0"
 divan = { package = "codspeed-divan-compat", version = "5.0.0" }
 enum-iterator = "2.0.0"
