@@ -255,7 +255,7 @@ mod tests {
         let remaining = Arc::new(AtomicU64::new(LIMIT));
         let handles: Vec<_> = (0..THREADS)
             .map(|_| {
-                let remaining = remaining.clone();
+                let remaining = Arc::clone(&remaining);
                 thread::spawn(move || {
                     let mut total: usize = 0;
                     while total < PER_THREAD_REQUEST {

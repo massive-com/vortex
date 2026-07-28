@@ -242,6 +242,12 @@ mod tests {
                 let vx_array_ptr = vx_array::new(Arc::new(array.into_array()));
                 vx_array_sink_push(sink, vx_array_ptr, &raw mut error);
                 vx_array_free(vx_array_ptr);
+                // Free any push error before reusing `error` for close, otherwise
+                // close overwrites the pointer and the push error leaks.
+                if !error.is_null() {
+                    vx_error_free(error);
+                    error = std::ptr::null_mut();
+                }
 
                 // Close should fail due to invalid path
                 vx_array_sink_close(sink, &raw mut error);

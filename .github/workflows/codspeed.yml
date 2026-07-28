@@ -24,6 +24,8 @@ env:
 
 jobs:
   bench-codspeed:
+    # CodSpeed requires an upstream account/token; skip on forks.
+    if: github.repository == 'vortex-data/vortex'
     strategy:
       matrix:
         include:

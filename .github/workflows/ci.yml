@@ -108,16 +108,23 @@ jobs:
           sccache: s3
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
       - uses: ./.github/actions/setup-prebuild
+      # doxygen is preinstalled on the prebuilt images; install it for forks.
+      - name: Install Doxygen
+        if: github.repository == 'massive-com/vortex'
+        uses: ssciwr/doxygen-install@329d88f5a303066a5bd006db7516b1925b86350e  # v2
 
       - name: Pytest - Vortex
         run: |
           uv run --all-packages pytest --benchmark-disable -n auto test/
         working-directory: vortex-python/
 
+      # Benchmark tuning requires the self-hosted prebuilt runner; skip on forks.
       - name: Setup benchmark environment
+        if: github.repository == 'vortex-data/vortex'
         run: sudo bash scripts/setup-benchmark.sh
 
       - name: Pytest Benchmarks - Vortex
+        if: github.repository == 'vortex-data/vortex'
         run: |
           bash ../scripts/bench-taskset.sh uv run --all-packages pytest --benchmark-only benchmark/
         working-directory: vortex-python/
@@ -193,7 +200,8 @@ jobs:
 
   build-rust:
     name: "Rust build (${{matrix.config.name}})"
-    timeout-minutes: 30
+    # Forks build without sccache, so give the uncached build more headroom.
+    timeout-minutes: ${{ github.repository == 'vortex-data/vortex' && 30 || 60 }}
     runs-on: >-
       ${{ github.repository == 'vortex-data/vortex'
           && format('runs-on={0}/runner={1}/image=ubuntu24-full-x64-pre-v2/tag={2}', github.run_id, matrix.config.runner, matrix.config.name)
@@ -533,6 +541,9 @@ jobs:
           sccache: s3
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
       - uses: ./.github/actions/setup-prebuild
+      # flatc is preinstalled on the prebuilt images; install it for forks.
+      - uses: ./.github/actions/setup-flatc
+        if: github.repository == 'massive-com/vortex'
       - name: Install nightly for cbindgen macro expansion
         run: rustup toolchain install $NIGHTLY_TOOLCHAIN
       - name: "regenerate all .fbs/.proto Rust code"
