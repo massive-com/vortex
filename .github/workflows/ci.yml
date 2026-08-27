@@ -581,7 +581,8 @@ jobs:
 
   cxx-api:
     name: "C++ API"
-    timeout-minutes: 5
+    # Forks compile without the upstream prebuilt runner artifacts.
+    timeout-minutes: ${{ github.repository == 'vortex-data/vortex' && 5 || 30 }}
     runs-on: >-
       ${{ github.repository == 'vortex-data/vortex'
           && format('runs-on={0}/runner=amd64-medium/image=ubuntu24-full-x64-pre-v2/extras=s3-cache/tag=cxx-build', github.run_id)
