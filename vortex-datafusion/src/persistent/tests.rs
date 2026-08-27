@@ -620,3 +620,249 @@ async fn arrow_uuid_extension_roundtrip_nested_struct() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+async fn plan_tree(ctx: &TestSessionContext, sql: &str) -> anyhow::Result<String> {
+    let df = ctx.session.sql(sql).await?;
+    let physical_plan = ctx
+        .session
+        .state()
+        .create_physical_plan(df.logical_plan())
+        .await?;
+    Ok(DisplayableExecutionPlan::new(physical_plan.as_ref())
+        .tree_render()
+        .to_string())
+}
+
+#[tokio::test]
+async fn reverse_pushdown_swaps_file_order() -> anyhow::Result<()> {
+    let ctx = TestSessionContext::default();
+
+    ctx.session
+        .sql(
+            "CREATE EXTERNAL TABLE ts_tbl \
+            (ts INT NOT NULL) \
+            STORED AS vortex \
+            WITH ORDER (ts ASC) \
+            LOCATION '/ts/'",
+        )
+        .await?;
+
+    let data = [vec![1, 2, 3], vec![10, 11, 12], vec![100, 101, 102]];
+
+    for chunk in data {
+        let values = chunk
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join("),(");
+        ctx.session
+            .sql(&format!("INSERT INTO ts_tbl VALUES ({values})"))
+            .await?
+            .collect()
+            .await?;
+    }
+
+    let tree = plan_tree(&ctx, "SELECT ts FROM ts_tbl ORDER BY ts DESC LIMIT 2").await?;
+    assert!(
+        tree.contains("reversed: true"),
+        "expected the source to be reversed, plan was:\n{tree}",
+    );
+    assert!(
+        tree.contains("SortExec(TopK)"),
+        "expected a TopK sort after reverse pushdown, plan was:\n{tree}",
+    );
+
+    let rows = ctx
+        .session
+        .sql("SELECT ts FROM ts_tbl ORDER BY ts DESC LIMIT 2")
+        .await?
+        .collect()
+        .await?;
+    let formatted = pretty_format_batches(&rows)?.to_string();
+    assert_snapshot!(formatted, @r"
+    +-----+
+    | ts  |
+    +-----+
+    | 102 |
+    | 101 |
+    +-----+
+    ");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn reverse_pushdown_rejected_for_unrelated_ordering() -> anyhow::Result<()> {
+    let ctx = TestSessionContext::default();
+
+    ctx.session
+        .sql(
+            "CREATE EXTERNAL TABLE ab_tbl \
+            (a INT NOT NULL, b INT NOT NULL) \
+            STORED AS vortex \
+            WITH ORDER (a ASC) \
+            LOCATION '/ab/'",
+        )
+        .await?;
+
+    ctx.session
+        .sql("INSERT INTO ab_tbl VALUES (1, 10), (2, 20)")
+        .await?
+        .collect()
+        .await?;
+
+    let tree = plan_tree(&ctx, "SELECT a, b FROM ab_tbl ORDER BY b DESC LIMIT 1").await?;
+    assert!(
+        tree.contains("Sort"),
+        "expected a Sort node when the requested ordering is unrelated, plan was:\n{tree}",
+    );
+    assert!(
+        !tree.contains("reversed: true"),
+        "expected the source to not be reversed, plan was:\n{tree}",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn reverse_pushdown_no_ordering_declared() -> anyhow::Result<()> {
+    let ctx = TestSessionContext::default();
+
+    ctx.session
+        .sql(
+            "CREATE EXTERNAL TABLE noord_tbl \
+            (ts INT NOT NULL) \
+            STORED AS vortex \
+            LOCATION '/noord/'",
+        )
+        .await?;
+
+    ctx.session
+        .sql("INSERT INTO noord_tbl VALUES (3), (1), (2)")
+        .await?
+        .collect()
+        .await?;
+
+    let tree = plan_tree(&ctx, "SELECT ts FROM noord_tbl ORDER BY ts DESC LIMIT 1").await?;
+    assert!(
+        tree.contains("Sort"),
+        "expected a Sort node when no WITH ORDER is declared, plan was:\n{tree}",
+    );
+    assert!(
+        !tree.contains("reversed: true"),
+        "expected the source to not be reversed, plan was:\n{tree}",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn reverse_pushdown_then_filter() -> anyhow::Result<()> {
+    let ctx = TestSessionContext::default();
+
+    ctx.session
+        .sql(
+            "CREATE EXTERNAL TABLE filt_tbl \
+            (ts INT NOT NULL) \
+            STORED AS vortex \
+            WITH ORDER (ts ASC) \
+            LOCATION '/filt/'",
+        )
+        .await?;
+
+    for chunk in [vec![1, 2, 3], vec![10, 11, 12], vec![100, 101, 102]] {
+        let values = chunk
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join("),(");
+        ctx.session
+            .sql(&format!("INSERT INTO filt_tbl VALUES ({values})"))
+            .await?
+            .collect()
+            .await?;
+    }
+
+    let rows = ctx
+        .session
+        .sql("SELECT ts FROM filt_tbl WHERE ts < 50 ORDER BY ts DESC LIMIT 2")
+        .await?
+        .collect()
+        .await?;
+
+    let formatted = pretty_format_batches(&rows)?.to_string();
+    assert_snapshot!(formatted, @r"
+    +----+
+    | ts |
+    +----+
+    | 12 |
+    | 11 |
+    +----+
+    ");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn order_by_desc_limit_returns_largest_rows() -> anyhow::Result<()> {
+    let ctx = TestSessionContext::default();
+
+    ctx.session
+        .sql(
+            "CREATE EXTERNAL TABLE big_tbl \
+            (ts INT NOT NULL, payload INT NOT NULL) \
+            STORED AS vortex \
+            WITH ORDER (ts ASC) \
+            LOCATION '/big/'",
+        )
+        .await?;
+
+    for file_idx in 0..5 {
+        let base = file_idx * 100;
+        let values = (0..100)
+            .map(|i| format!("({}, {})", base + i, (base + i) * 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ctx.session
+            .sql(&format!("INSERT INTO big_tbl VALUES {values}"))
+            .await?
+            .collect()
+            .await?;
+    }
+
+    let rows = ctx
+        .session
+        .sql("SELECT ts FROM big_tbl WHERE ts >= 50 ORDER BY ts DESC LIMIT 10")
+        .await?
+        .collect()
+        .await?;
+    let formatted = pretty_format_batches(&rows)?.to_string();
+    assert_snapshot!(formatted, @r"
+    +-----+
+    | ts  |
+    +-----+
+    | 499 |
+    | 498 |
+    | 497 |
+    | 496 |
+    | 495 |
+    | 494 |
+    | 493 |
+    | 492 |
+    | 491 |
+    | 490 |
+    +-----+
+    ");
+
+    let tree = plan_tree(
+        &ctx,
+        "SELECT ts FROM big_tbl WHERE ts >= 50 ORDER BY ts DESC LIMIT 10",
+    )
+    .await?;
+    assert!(
+        tree.contains("reversed: true"),
+        "expected reverse pushdown to engage end-to-end, plan was:\n{tree}",
+    );
+
+    Ok(())
+}

@@ -21,6 +21,7 @@ use crate::arrays::chunked::ChunkedArrayExt;
 use crate::arrays::dict::DictArrayExt;
 use crate::arrays::dict::DictArraySlotsExt;
 use crate::arrays::filter::FilterReduceAdaptor;
+use crate::arrays::reversed::ReverseReduceAdaptor;
 use crate::arrays::scalar_fn::AnyScalarFn;
 use crate::arrays::scalar_fn::ScalarFnArrayExt;
 use crate::arrays::slice::SliceReduceAdaptor;
@@ -43,6 +44,7 @@ pub(crate) const PARENT_RULES: ParentRuleSet<Dict> = ParentRuleSet::new(&[
     ParentRuleSet::lift(&DictionaryChunkedValuesPullUpRule),
     ParentRuleSet::lift(&DictionaryScalarFnValuesPushDownRule),
     ParentRuleSet::lift(&DictionaryScalarFnCodesPullUpRule),
+    ParentRuleSet::lift(&ReverseReduceAdaptor(Dict)),
     ParentRuleSet::lift(&SliceReduceAdaptor(Dict)),
 ]);
 

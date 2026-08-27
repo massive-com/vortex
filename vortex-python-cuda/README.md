@@ -22,8 +22,8 @@ everything else a `cudf.Series`. Importing `vortex_cuda` installs it as `vortex.
 import vortex, vortex_cuda
 import pyarrow as pa
 
-s = vortex.array([1, None, 3]).to_cudf()                  # -> cudf.Series
-df = vortex_cuda.to_cudf(                                  # struct -> cudf.DataFrame
+s = vortex.array([1, None, 3]).to_cudf()  # -> cudf.Series
+df = vortex_cuda.to_cudf(  # struct -> cudf.DataFrame
     vortex.Array.from_arrow(pa.table({"x": [1, None, 3], "y": [4.0, 5.0, 6.0]}))
 )
 ```
@@ -45,7 +45,7 @@ available), so any Arrow-C-Device consumer can ingest it zero-copy:
 import vortex, vortex_cuda, pylibcudf
 
 array = vortex.array([1, None, 3])
-column = pylibcudf.Column.from_arrow(array)                # via the protocol
+column = pylibcudf.Column.from_arrow(array)  # via the protocol
 
 schema_capsule, device_array_capsule = vortex_cuda.export_device_array(array)  # raw capsules
 ```

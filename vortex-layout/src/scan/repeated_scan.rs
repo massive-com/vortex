@@ -5,6 +5,8 @@ use std::cmp;
 use std::iter;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use futures::Stream;
 use futures::future::BoxFuture;
@@ -41,6 +43,8 @@ pub struct RepeatedScan<A: 'static + Send> {
     projection: BoundExpression,
     filter: Option<BoundExpression>,
     ordered: bool,
+    /// Whether to iterate chunks in reverse order (last chunk first).
+    reversed: bool,
     /// Optionally read a subset of the rows in the file.
     row_range: Option<Range<u64>>,
     /// The selection mask to apply to the selected row range.
@@ -95,6 +99,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
         projection: BoundExpression,
         filter: Option<BoundExpression>,
         ordered: bool,
+        reversed: bool,
         row_range: Option<Range<u64>>,
         selection: Selection,
         splits: Splits,
@@ -109,6 +114,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
             projection,
             filter,
             ordered,
+            reversed,
             row_range,
             selection,
             splits,
@@ -171,25 +177,41 @@ impl<A: 'static + Send> RepeatedScan<A> {
             }),
         };
 
-        let mut limit = self.limit;
+        // Promote the scalar limit to a shared atomic counter so that the limit can be applied
+        // safely across both the synchronous no-filter path and the asynchronous filter path.
+        // All tasks share this counter and reserve from it atomically.
+        let limit = self.limit.map(|l| Arc::new(AtomicU64::new(l)));
         let mut tasks = Vec::new();
         let ctx = Arc::new(TaskContext {
+            selection: self.selection.clone(),
             filter: self.filter.clone().map(|f| Arc::new(FilterExpr::new(f))),
             reader: Arc::clone(&self.layout_reader),
             projection: self.projection.clone(),
             mapper: Arc::clone(&self.map_fn),
         });
 
+        let ranges = if self.reversed {
+            Either::Left(ranges.collect::<Vec<_>>().into_iter().rev())
+        } else {
+            Either::Right(ranges)
+        };
+
         for range in ranges {
-            let row_mask = self.selection.row_mask(&range);
-            if row_mask.mask().all_false() {
+            if range.start >= range.end {
                 continue;
             }
 
-            tasks.push(split_exec(Arc::clone(&ctx), row_mask, limit.as_mut())?);
-            if limit.is_some_and(|l| l == 0) {
+            // The counter only ever decreases, so if a previous split has already drained it
+            // we can stop building tasks. Splits whose IO is already in flight will still
+            // observe the empty counter and short-circuit.
+            if limit
+                .as_ref()
+                .is_some_and(|l| l.load(Ordering::Acquire) == 0)
+            {
                 break;
             }
+
+            tasks.push(split_exec(Arc::clone(&ctx), range, limit.clone())?);
         }
 
         Ok(tasks)
@@ -207,7 +229,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
         let stream =
             futures::stream::iter(self.execute(row_range)?).map(move |task| handle.spawn(task));
 
-        let stream = if self.ordered {
+        let stream = if self.ordered || self.reversed {
             stream.buffered(concurrency).boxed()
         } else {
             stream.buffer_unordered(concurrency).boxed()

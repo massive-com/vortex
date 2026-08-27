@@ -17,10 +17,10 @@ use vortex_io::VortexReadAt;
 use vortex_io::session::RuntimeSessionExt;
 use vortex_layout::segments::InstrumentedSegmentCache;
 use vortex_layout::segments::NoOpSegmentCache;
-use vortex_layout::segments::SegmentCache;
 use vortex_layout::segments::SegmentCacheSourceAdapter;
 use vortex_layout::segments::SegmentId;
 use vortex_layout::segments::SegmentSource;
+use vortex_layout::segments::SharedSegmentCache;
 use vortex_layout::segments::SharedSegmentSource;
 use vortex_layout::session::LayoutSessionExt;
 use vortex_metrics::DefaultMetricsRegistry;
@@ -58,7 +58,7 @@ pub struct VortexOpenOptions {
     /// The session to use for opening the file.
     session: VortexSession,
     /// Cache to use for file segments.
-    segment_cache: Option<Arc<dyn SegmentCache>>,
+    segment_cache: Option<SharedSegmentCache>,
     /// The number of bytes to read when parsing the footer.
     initial_read_size: usize,
     /// An optional, externally provided, file size.
@@ -131,7 +131,18 @@ impl VortexOpenOptions {
     ///
     /// The cache is checked before the underlying file segment source. Segments covered by the
     /// initial footer read are also inserted into an internal first-read cache.
-    pub fn with_segment_cache(mut self, segment_cache: Arc<dyn SegmentCache>) -> Self {
+    /// The supplied cache must be **scoped to a single file**: [`SegmentId`] is a
+    /// file-local index, so reusing one cache across multiple files will alias entries
+    /// from different files onto the same key. For cross-file sharing use a
+    /// [`SegmentCacheBuilder`] (e.g.
+    /// [`NamespacedMokaSegmentCacheBuilder`](vortex_layout::segments::NamespacedMokaSegmentCacheBuilder))
+    /// at the layer that opens files, and pass the per-file [`SegmentCache`] it returns
+    /// here.
+    ///
+    /// [`SegmentCache`]: vortex_layout::segments::SegmentCache
+    /// [`SegmentId`]: vortex_layout::segments::SegmentId
+    /// [`SegmentCacheBuilder`]: vortex_layout::segments::SegmentCacheBuilder
+    pub fn with_segment_cache(mut self, segment_cache: SharedSegmentCache) -> Self {
         self.segment_cache = Some(segment_cache);
         self
     }

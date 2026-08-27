@@ -43,6 +43,10 @@ jobs:
 
   rust-coverage:
     name: "Rust tests (coverage) (${{ matrix.suite }})"
+    # Coverage instruments and runs the whole test suite, which OOMs the
+    # GitHub-hosted runners forks use (upstream runs it on larger self-hosted
+    # runners); it also uploads to Codecov via OIDC that forks lack. Skip on forks.
+    if: github.repository == 'vortex-data/vortex'
     needs: duckdb-ready
     timeout-minutes: 30
     permissions:
@@ -168,7 +172,8 @@ jobs:
       ${{ github.repository == 'vortex-data/vortex'
           && format('runs-on={0}/pool=amd64-medium-pre-v2/tag=rust-test-sanitizer', github.run_id)
           || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    # Forks build instrumented without sccache; give the uncached run more headroom.
+    timeout-minutes: ${{ github.repository == 'vortex-data/vortex' && 30 || 90 }}
     env:
       ASAN_OPTIONS: "symbolize=1:check_initialization_order=1:detect_leaks=1:leak_check_at_exit=1"
       LSAN_OPTIONS: "report_objects=1"
@@ -194,6 +199,27 @@ jobs:
         run: |
           rustup toolchain install $NIGHTLY_TOOLCHAIN
           rustup component add --toolchain $NIGHTLY_TOOLCHAIN rust-src rustfmt clippy llvm-tools-preview
+      # The prebuilt image ships /usr/bin/llvm-symbolizer; GitHub-hosted runners
+      # do not. Without it TSan/ASan cannot symbolize frames, so the
+      # tsan_suppressions.txt entries (benign crossbeam/oneshot fence races)
+      # never match and fail the job. Symlink an available llvm-symbolizer.
+      - name: Ensure llvm-symbolizer (forks)
+        if: github.repository == 'massive-com/vortex'
+        shell: bash
+        run: |
+          if [ ! -x /usr/bin/llvm-symbolizer ]; then
+            sym="$(command -v llvm-symbolizer \
+              || ls -1 /usr/bin/llvm-symbolizer-* 2>/dev/null | sort -V | tail -1 \
+              || ls -1 /usr/lib/llvm-*/bin/llvm-symbolizer 2>/dev/null | sort -V | tail -1)"
+            if [ -z "$sym" ]; then
+              sudo apt-get update
+              sudo apt-get install -y llvm
+              sym="$(ls -1 /usr/bin/llvm-symbolizer-* 2>/dev/null | sort -V | tail -1 \
+                || ls -1 /usr/lib/llvm-*/bin/llvm-symbolizer 2>/dev/null | sort -V | tail -1)"
+            fi
+            sudo ln -sf "$sym" /usr/bin/llvm-symbolizer
+          fi
+          /usr/bin/llvm-symbolizer --version
       - name: Build tests with sanitizer
         run: |
           RUSTFLAGS="${RUSTFLAGS} ${{ matrix.sanitizer_flags }}" \

@@ -25,7 +25,6 @@ use vortex_array::stream::ArrayStream;
 use vortex_array::stream::ArrayStreamAdapter;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
-use vortex_error::vortex_bail;
 use vortex_io::runtime::BlockingRuntime;
 use vortex_io::runtime::Handle;
 use vortex_io::runtime::Task;
@@ -62,6 +61,10 @@ pub struct ScanBuilder<A> {
     filter: Option<BoundExpression>,
     /// Whether the scan needs to return splits in the order they appear in the file.
     ordered: bool,
+    /// Whether to yield chunks in reverse file order, with rows within each chunk also reversed.
+    ///
+    /// Implies ordered output (chunks are emitted in strict reverse sequence, not interleaved).
+    reversed: bool,
     /// Optionally read a subset of the rows in the file.
     row_range: Option<Range<u64>>,
     /// The selection mask to apply to the selected row range.
@@ -96,6 +99,7 @@ impl ScanBuilder<ArrayRef> {
             projection,
             filter: None,
             ordered: true,
+            reversed: false,
             row_range: None,
             selection: Default::default(),
             split_by: SplitBy::Layout,
@@ -161,6 +165,21 @@ impl<A: 'static + Send> ScanBuilder<A> {
     /// Configure whether output chunks must be yielded in file order.
     pub fn with_ordered(mut self, ordered: bool) -> Self {
         self.ordered = ordered;
+        self
+    }
+
+    /// Returns whether output chunks are yielded in reverse file order.
+    pub fn reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Reverse the scan order: chunks are yielded last-to-first, and rows within each chunk are
+    /// also reversed. This produces a globally reversed row sequence without reading the whole
+    /// file first.
+    ///
+    /// Reversed scans always produce ordered output (equivalent to `with_ordered(true)`).
+    pub fn with_reversed(mut self, reversed: bool) -> Self {
+        self.reversed = reversed;
         self
     }
 
@@ -284,6 +303,7 @@ impl<A: 'static + Send> ScanBuilder<A> {
             projection: self.projection,
             filter: self.filter,
             ordered: self.ordered,
+            reversed: self.reversed,
             row_range: self.row_range,
             selection: self.selection,
             split_by: self.split_by,
@@ -300,10 +320,6 @@ impl<A: 'static + Send> ScanBuilder<A> {
     /// Optimize expressions, compute split ranges, and return an executable repeated scan.
     pub fn prepare(self) -> VortexResult<RepeatedScan<A>> {
         let dtype = self.dtype()?;
-
-        if self.filter.is_some() && self.limit.is_some() {
-            vortex_bail!("Vortex doesn't support scans with both a filter and a limit")
-        }
 
         // Spin up the root layout reader, and wrap it in a FilterLayoutReader to perform
         // conjunction splitting if a filter is provided.
@@ -347,17 +363,26 @@ impl<A: 'static + Send> ScanBuilder<A> {
                 )
             };
 
+        let map_fn = if self.reversed {
+            let original = self.map_fn;
+            Arc::new(move |array: ArrayRef| original(array.reverse()?))
+                as Arc<dyn Fn(ArrayRef) -> VortexResult<A> + Send + Sync>
+        } else {
+            self.map_fn
+        };
+
         Ok(RepeatedScan::new(
             self.session.clone(),
             layout_reader,
             bound_projection,
             bound_filter,
             self.ordered,
+            self.reversed,
             self.row_range,
             self.selection,
             splits,
             self.concurrency,
-            self.map_fn,
+            map_fn,
             self.limit,
             dtype,
         ))
@@ -428,7 +453,7 @@ impl<A: 'static + Send> Stream for LazyScanStream<A> {
             match &mut self.state {
                 LazyScanState::Builder(builder) => {
                     let builder = builder.take().vortex_expect("polled after completion");
-                    let ordered = builder.ordered;
+                    let ordered = builder.ordered || builder.reversed;
                     let num_workers = get_available_parallelism().unwrap_or(1);
                     let concurrency = builder.concurrency * num_workers;
                     let handle = builder.session.handle();

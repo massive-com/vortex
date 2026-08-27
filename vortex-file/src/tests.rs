@@ -2800,3 +2800,66 @@ async fn repro_8166_binary_gt_all_ff_max() -> VortexResult<()> {
     assert_eq!(result.len(), 1);
     Ok(())
 }
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn limit_with_filter_straddles_split_boundary() -> VortexResult<()> {
+    let chunks = (0..3)
+        .map(|chunk_idx| {
+            let base = chunk_idx * 100;
+            (base..base + 100).collect::<PrimitiveArray>().into_array()
+        })
+        .collect::<Vec<_>>();
+    let numbers = ChunkedArray::from_iter(chunks).into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    let result = file
+        .scan()?
+        .with_filter(bind_scan_expr(
+            &file,
+            gt_eq(get_item("n", root()), lit(0_i32)),
+        ))
+        .with_limit(250)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    assert_eq!(result.len(), 250);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn limit_zero_with_filter_yields_no_rows() -> VortexResult<()> {
+    let numbers = (0..200).collect::<PrimitiveArray>().into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(buf)?;
+
+    let result = file
+        .scan()?
+        .with_filter(bind_scan_expr(
+            &file,
+            gt_eq(get_item("n", root()), lit(0_i32)),
+        ))
+        .with_limit(0)
+        .into_array_stream()?
+        .read_all()
+        .await?;
+
+    assert_eq!(result.len(), 0);
+    Ok(())
+}

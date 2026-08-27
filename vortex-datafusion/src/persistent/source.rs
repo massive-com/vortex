@@ -15,11 +15,12 @@ use datafusion_datasource::file_stream::FileOpener;
 use datafusion_execution::cache::cache_manager::FileMetadataCache;
 use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_expr::PhysicalExprRef;
-use datafusion_physical_expr::PhysicalSortExpr;
 use datafusion_physical_expr::conjunction;
 use datafusion_physical_expr::projection::ProjectionExprs;
 use datafusion_physical_expr_adapter::DefaultPhysicalExprAdapterFactory;
 use datafusion_physical_expr_common::physical_expr::fmt_sql;
+use datafusion_physical_expr_common::sort_expr::LexOrdering;
+use datafusion_physical_expr_common::sort_expr::PhysicalSortExpr;
 use datafusion_physical_plan::DisplayFormatType;
 use datafusion_physical_plan::PhysicalExpr;
 use datafusion_physical_plan::SortOrderPushdownResult;
@@ -31,6 +32,7 @@ use object_store::ObjectStore;
 use object_store::path::Path;
 use vortex::file::VORTEX_FILE_EXTENSION;
 use vortex::layout::LayoutReader;
+use vortex::layout::segments::SegmentCacheBuilder;
 use vortex::metrics::DefaultMetricsRegistry;
 use vortex::metrics::MetricsRegistry;
 use vortex::session::VortexSession;
@@ -203,8 +205,12 @@ pub struct VortexSource {
     pub(crate) ordered: bool,
     vx_metrics_registry: Arc<dyn MetricsRegistry>,
     file_metadata_cache: Option<Arc<FileMetadataCache>>,
+    /// Builder used to construct a file-scoped segment cache for each opened file.
+    segment_cache_builder: Option<Arc<dyn SegmentCacheBuilder>>,
     /// Options controlling scan planning and execution behavior.
     options: VortexTableOptions,
+    /// Whether the underlying Vortex scan should yield rows in reverse file order.
+    reversed: bool,
 }
 
 impl VortexSource {
@@ -236,7 +242,9 @@ impl VortexSource {
             vx_metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             file_metadata_cache: None,
             ordered: false,
+            segment_cache_builder: None,
             options: VortexTableOptions::default(),
+            reversed: false,
         }
     }
 
@@ -301,6 +309,22 @@ impl VortexSource {
         self
     }
 
+    /// Sets a [`SegmentCacheBuilder`] to reuse segment bytes across scans of the same files.
+    ///
+    /// Without a builder every query re-reads zone map and data segments from object storage.
+    /// The builder is invoked once per opened file with that file's
+    /// [`FileIdentity`](vortex::layout::segments::FileIdentity); the returned per-file
+    /// [`SegmentCache`](vortex::layout::segments::SegmentCache) is wired into the file open
+    /// path. Use
+    /// [`NamespacedMokaSegmentCacheBuilder`](vortex::layout::segments::NamespacedMokaSegmentCacheBuilder)
+    /// for cross-query reuse with a global memory budget, optionally wrapped in
+    /// [`InstrumentedSegmentCacheBuilder`](vortex::layout::segments::InstrumentedSegmentCacheBuilder)
+    /// for hit/miss metrics.
+    pub fn with_segment_cache_builder(mut self, builder: Arc<dyn SegmentCacheBuilder>) -> Self {
+        self.segment_cache_builder = Some(builder);
+        self
+    }
+
     /// Sets the per-file Vortex scan concurrency.
     ///
     /// This is separate from DataFusion's partition-level parallelism.
@@ -323,6 +347,17 @@ impl VortexSource {
     /// Returns the predicate this source is going to push down
     pub fn predicate(&self) -> Option<&Arc<dyn PhysicalExpr>> {
         self.vortex_predicate.as_ref()
+    }
+
+    /// Whether the scan will yield rows in reverse file order.
+    pub fn reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Configure the scan to yield rows in reverse file order.
+    pub fn with_reversed(mut self, reversed: bool) -> Self {
+        self.reversed = reversed;
+        self
     }
 
     fn create_vortex_opener(
@@ -358,8 +393,10 @@ impl VortexSource {
             has_output_ordering: !base_config.output_ordering.is_empty() || self.ordered,
             expression_convertor: Arc::clone(&self.expression_convertor),
             file_metadata_cache: self.file_metadata_cache.clone(),
+            segment_cache_builder: self.segment_cache_builder.clone(),
             projection_pushdown: self.options.projection_pushdown,
             scan_concurrency: self.options.scan_concurrency,
+            reversed: self.reversed,
         };
 
         Ok(opener)
@@ -397,32 +434,14 @@ impl FileSource for VortexSource {
         VORTEX_FILE_EXTENSION
     }
 
-    fn try_pushdown_sort(
-        &self,
-        order: &[PhysicalSortExpr],
-        eq_properties: &EquivalenceProperties,
-    ) -> DFResult<SortOrderPushdownResult<Arc<dyn FileSource>>> {
-        if order.is_empty() {
-            return Ok(SortOrderPushdownResult::Unsupported);
-        }
-
-        if eq_properties.ordering_satisfy(order.iter().cloned())? {
-            let mut this = self.clone();
-            this.ordered = true;
-
-            return Ok(SortOrderPushdownResult::Exact {
-                inner: Arc::new(this) as Arc<dyn FileSource>,
-            });
-        }
-
-        Ok(SortOrderPushdownResult::Unsupported)
-    }
-
     fn fmt_extra(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         match t {
             DisplayFormatType::Default | DisplayFormatType::Verbose => {
                 if let Some(predicate) = &self.vortex_predicate {
                     write!(f, ", predicate: {predicate}")?;
+                }
+                if self.reversed {
+                    write!(f, ", reversed: true")?;
                 }
             }
             // Use TreeRender style key=value formatting to display the predicate
@@ -430,6 +449,9 @@ impl FileSource for VortexSource {
                 if let Some(predicate) = &self.vortex_predicate {
                     writeln!(f, "predicate={}", fmt_sql(predicate.as_ref()))?;
                 };
+                if self.reversed {
+                    writeln!(f, "reversed=true")?;
+                }
             }
         }
         Ok(())
@@ -523,6 +545,70 @@ impl FileSource for VortexSource {
         let mut source = self.clone();
         source.projection = self.projection.try_merge(projection)?;
         Ok(Some(Arc::new(source)))
+    }
+
+    /// Attempt to push down a reversed scan when the requested ordering is the strict reverse
+    /// of one of the source's declared output orderings.
+    ///
+    /// Mental model: the rebuilt source emits rows **already in the target order**, and the
+    /// scan-time atomic counter inside `VortexOpener` caps emission once the LIMIT is
+    /// satisfied. This is fundamentally different from the
+    /// dynamic-filter-pushdown shape `ParquetSource` uses for unsorted `ORDER BY x LIMIT k`,
+    /// where TopK above the scan feeds bounds back as a dynamic filter. Here the source is
+    /// the correctness guarantor for ordering; the `SortExec(TopK)` left above the rebuilt
+    /// source by the planner is just a passthrough cap plus a cross-split merge.
+    ///
+    /// The reversal itself is **exact** at the Vortex layer: `ScanBuilder::with_reversed`
+    /// flips intra-file split order *and* reverses rows within each chunk (via
+    /// `ArrayRef::reverse` on every produced array), so each file emits its rows in true
+    /// reverse order — not just reversed at chunk granularity. Combined with
+    /// `FileScanConfig::rebuild_with_source` reversing the `file_groups` order, the
+    /// overall stream is fully reversed.
+    ///
+    /// We could in principle return `Exact` and let the planner drop the upstream sort.
+    /// DataFusion 55's `rebuild_with_source` deliberately treats reversed file groups as
+    /// inexact, however: it clears the original `output_ordering` and retains the `SortExec`.
+    /// Returning `Inexact` here matches that contract and avoids advertising the original,
+    /// now-reversed ordering. This is a DataFusion plumbing concession, not a Vortex
+    /// correctness limitation.
+    fn try_pushdown_sort(
+        &self,
+        order: &[PhysicalSortExpr],
+        eq_properties: &EquivalenceProperties,
+    ) -> DFResult<SortOrderPushdownResult<Arc<dyn FileSource>>> {
+        if order.is_empty() {
+            return Ok(SortOrderPushdownResult::Unsupported);
+        }
+
+        if eq_properties.ordering_satisfy(order.iter().cloned())? {
+            let mut this = self.clone();
+            this.ordered = true;
+
+            return Ok(SortOrderPushdownResult::Exact {
+                inner: Arc::new(this) as Arc<dyn FileSource>,
+            });
+        }
+
+        let Some(requested) = LexOrdering::new(order.iter().cloned()) else {
+            return Ok(SortOrderPushdownResult::Unsupported);
+        };
+
+        // The source advertises one or more candidate orderings via its equivalence
+        // properties. We can satisfy the request by reading in reverse only if reversing
+        // some declared ordering yields a prefix that matches the request.
+        let can_reverse = eq_properties
+            .oeq_class()
+            .iter()
+            .any(|candidate| candidate.is_reverse(&requested));
+
+        if !can_reverse {
+            return Ok(SortOrderPushdownResult::Unsupported);
+        }
+
+        let reversed = self.clone().with_reversed(!self.reversed);
+        Ok(SortOrderPushdownResult::Inexact {
+            inner: Arc::new(reversed) as Arc<dyn FileSource>,
+        })
     }
 
     fn projection(&self) -> Option<&ProjectionExprs> {
