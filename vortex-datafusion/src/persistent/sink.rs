@@ -135,7 +135,8 @@ impl FileSink for VortexSink {
 
         // TODO(adamg):
         // 1. We can probably be better at signaling how much memory we're consuming (potentially when reading too), see ParquetSink::spawn_writer_tasks_and_join.
-        while let Some((path, rx)) = file_stream_rx.recv().await {
+        while let Some((file_metadata, rx)) = file_stream_rx.recv().await {
+            let path = file_metadata.path;
             let session = self.session.clone();
             let object_store = Arc::clone(&object_store);
 
@@ -155,7 +156,8 @@ impl FileSink for VortexSink {
 
                 let mut object_writer = ObjectStoreWrite::new(object_store, &path)
                     .await
-                    .map_err(|e| exec_datafusion_err!("Failed to create ObjectStoreWrite: {e}"))?;
+                    .map_err(|e| exec_datafusion_err!("Failed to create ObjectStoreWrite: {e}"))?
+                    .with_bytes_written_counter(file_metadata.size);
 
                 let summary = session
                     .write_options()

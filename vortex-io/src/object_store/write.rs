@@ -3,6 +3,8 @@
 
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use bytes::BytesMut;
 use futures::TryStreamExt;
@@ -25,6 +27,7 @@ pub struct ObjectStoreWrite {
     upload: Box<dyn MultipartUpload>,
     buffer: BytesMut,
     put_result: Option<PutResult>,
+    bytes_written: Option<Arc<AtomicU64>>,
 }
 
 const CHUNK_SIZE: usize = 16 * 1024 * 1024;
@@ -37,11 +40,18 @@ impl ObjectStoreWrite {
             upload,
             buffer: BytesMut::with_capacity(CHUNK_SIZE),
             put_result: None,
+            bytes_written: None,
         })
     }
 
     pub fn put_result(&self) -> Option<&PutResult> {
         self.put_result.as_ref()
+    }
+
+    /// Reports accepted bytes, including buffered bytes, for output file rotation.
+    pub fn with_bytes_written_counter(mut self, counter: Arc<AtomicU64>) -> Self {
+        self.bytes_written = Some(counter);
+        self
     }
 }
 
@@ -62,6 +72,13 @@ impl VortexWrite for ObjectStoreWrite {
         }
 
         parts.try_collect::<Vec<_>>().await?;
+
+        if let Some(counter) = &self.bytes_written {
+            counter.fetch_add(
+                u64::try_from(buffer.as_slice().len()).map_err(io::Error::other)?,
+                Ordering::Relaxed,
+            );
+        }
 
         Ok(buffer)
     }
@@ -129,7 +146,10 @@ mod tests {
         let location = Path::from("test.bin");
 
         for test_store in [memory_store, local_store] {
-            let mut writer = ObjectStoreWrite::new(Arc::clone(&test_store), &location).await?;
+            let counter = Arc::new(AtomicU64::new(0));
+            let mut writer = ObjectStoreWrite::new(Arc::clone(&test_store), &location)
+                .await?
+                .with_bytes_written_counter(Arc::clone(&counter));
 
             #[expect(clippy::cast_possible_truncation)]
             let data = (0..3)
@@ -140,6 +160,10 @@ mod tests {
             for i in 0..3 {
                 let data = data[i].clone();
                 writer.write_all(data).await?;
+                assert_eq!(
+                    counter.load(Ordering::Relaxed),
+                    ((i + 1) * chunk_size) as u64
+                );
                 writer.flush().await?;
             }
 
@@ -152,6 +176,7 @@ mod tests {
 
             let expected_data = itertools::concat(data.into_iter());
             assert_eq!(bytes, expected_data);
+            assert_eq!(counter.load(Ordering::Relaxed), bytes.len() as u64);
         }
 
         Ok(())

@@ -303,9 +303,7 @@ mod tests {
     fn test_schema_metadata_preserved() -> DFResult<()> {
         let logical_schema = Schema::new_with_metadata(
             vec![Field::new("col", DataType::Int32, false)],
-            [("table".to_string(), "metadata".to_string())]
-                .into_iter()
-                .collect(),
+            [("table".to_string(), "metadata".to_string())],
         );
         let dtype = DType::Struct(
             StructFields::from_iter([(
@@ -491,11 +489,11 @@ mod tests {
     #[test]
     fn test_map_schema_conversion_preserves_reference_fields() {
         let key = Field::new("custom_key", DataType::Int32, false)
-            .with_metadata([("key_metadata".to_owned(), "key_value".to_owned())].into());
+            .with_metadata([("key_metadata".to_owned(), "key_value".to_owned())]);
         let value = Field::new("custom_value", DataType::Utf8, true)
-            .with_metadata([("value_metadata".to_owned(), "value_value".to_owned())].into());
+            .with_metadata([("value_metadata".to_owned(), "value_value".to_owned())]);
         let entries = Field::new_struct("custom_entries", vec![key, value], false)
-            .with_metadata([("entries_metadata".to_owned(), "entries_value".to_owned())].into());
+            .with_metadata([("entries_metadata".to_owned(), "entries_value".to_owned())]);
         let logical_schema = Schema::new(vec![Field::new(
             "map_col",
             DataType::Map(Arc::new(entries), true),

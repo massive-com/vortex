@@ -486,7 +486,7 @@ mod tests {
 
     unsafe fn release_schema(schema: &mut FFI_ArrowSchema) {
         unsafe {
-            if let Some(release) = schema.release {
+            if let Some(release) = schema.release() {
                 release(schema);
             }
         }

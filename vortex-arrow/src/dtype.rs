@@ -292,13 +292,10 @@ fn to_arrow_schema_naive(dtype: &DType) -> VortexResult<Schema> {
     for (field_name, field_dtype) in struct_dtype.names().iter().zip(struct_dtype.fields()) {
         let field = if field_dtype.is_variant() {
             let storage = DataType::Struct(variant_storage_fields_minimal());
-            Field::new(field_name.as_ref(), storage, field_dtype.is_nullable()).with_metadata(
-                [(
-                    "ARROW:extension:name".to_owned(),
-                    "arrow.parquet.variant".to_owned(),
-                )]
-                .into(),
-            )
+            Field::new(field_name.as_ref(), storage, field_dtype.is_nullable()).with_metadata([(
+                "ARROW:extension:name".to_owned(),
+                "arrow.parquet.variant".to_owned(),
+            )])
         } else {
             Field::new(
                 field_name.as_ref(),

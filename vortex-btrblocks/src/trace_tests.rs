@@ -120,7 +120,7 @@ fn lineitem() -> VortexResult<ArrayRef> {
     let batch: RecordBatch = LineItemArrow::new(generator)
         .with_batch_size(1 << 12)
         .next()
-        .expect("at least one batch");
+        .expect("at least one batch")?;
     let schema = batch.schema();
     trace_session()
         .arrow()

@@ -961,19 +961,16 @@ mod tests {
             write_arrow_to_vortex(Arc::clone(&object_store), file_path, batch.clone()).await?;
 
         let file_schema = Arc::new(
-            batch.schema().as_ref().clone().with_metadata(
-                [("table".to_string(), "metadata".to_string())]
-                    .into_iter()
-                    .collect(),
-            ),
+            batch
+                .schema()
+                .as_ref()
+                .clone()
+                .with_metadata([("table".to_string(), "metadata".to_string())]),
         );
         let table_schema = TableSchema::builder(file_schema)
             .with_table_partition_cols(vec![Arc::new(
-                Field::new("part", DataType::Int32, false).with_metadata(
-                    [("partition".to_string(), "metadata".to_string())]
-                        .into_iter()
-                        .collect(),
-                ),
+                Field::new("part", DataType::Int32, false)
+                    .with_metadata([("partition".to_string(), "metadata".to_string())]),
             )])
             .build();
         let projection = ProjectionExprs::from_indices(&[0, 1], table_schema.table_schema());
