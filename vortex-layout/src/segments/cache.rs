@@ -99,9 +99,20 @@ impl SegmentCache for MokaSegmentCache {
     }
 
     async fn put(&self, id: SegmentId, buffer: ByteBuffer) -> VortexResult<()> {
-        self.0.insert(id, buffer).await;
+        self.0.insert(id, owned_copy(&buffer)).await;
         Ok(())
     }
+}
+
+/// Copies `buffer` into a new allocation of exactly its length, with the same alignment.
+///
+/// Segment reads are often coalesced: one I/O request reads a larger range (up to 16 MiB for
+/// object storage), and each segment is a zero-copy slice of that buffer. The Moka caches weigh an
+/// entry by `buffer.len()`. If a cache stored the slice, the entry would keep the whole coalesced
+/// buffer alive but count only the slice, so the cache could hold far more memory than its
+/// capacity. The copy runs once per cache store, that is once per cache miss.
+fn owned_copy(buffer: &ByteBuffer) -> ByteBuffer {
+    ByteBuffer::copy_from_aligned(buffer.as_slice(), buffer.alignment())
 }
 
 /// Wrapper for [`SegmentCache`] that tracks its hit rate.
@@ -342,13 +353,16 @@ impl SegmentCache for NamespacedMokaSegmentCache {
     }
 
     async fn put(&self, id: SegmentId, buffer: ByteBuffer) -> VortexResult<()> {
-        self.cache.insert((self.file_id, *id), buffer).await;
+        self.cache
+            .insert((self.file_id, *id), owned_copy(&buffer))
+            .await;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use vortex_buffer::Alignment;
     use vortex_metrics::DefaultMetricsRegistry;
     use vortex_metrics::MetricValue;
 
@@ -379,6 +393,49 @@ mod tests {
                 other => panic!("expected counter for {name}, got {other:?}"),
             })
             .unwrap_or_else(|| panic!("metric {name} not registered"))
+    }
+
+    /// Returns true if `inner` points into the allocation of `outer`.
+    fn shares_allocation(inner: &ByteBuffer, outer: &ByteBuffer) -> bool {
+        outer
+            .as_slice()
+            .as_ptr_range()
+            .contains(&inner.as_slice().as_ptr())
+    }
+
+    /// A slice of a large buffer, like a segment cut from a coalesced read.
+    fn coalesced_slice() -> (ByteBuffer, ByteBuffer) {
+        let coalesced = ByteBuffer::copy_from_aligned(vec![7u8; 1 << 20], Alignment::new(64));
+        let slice = coalesced.slice(4096..4096 + 128);
+        assert!(shares_allocation(&slice, &coalesced));
+        (coalesced, slice)
+    }
+
+    #[tokio::test]
+    async fn moka_stores_owned_copy_of_slice() -> VortexResult<()> {
+        let (coalesced, slice) = coalesced_slice();
+        let cache = MokaSegmentCache::new(1 << 20);
+        cache.put(segment(1), slice.clone()).await?;
+
+        let cached = cache.get(segment(1)).await?.vortex_expect("cached");
+        assert_eq!(cached, slice);
+        assert_eq!(cached.alignment(), slice.alignment());
+        assert!(!shares_allocation(&cached, &coalesced));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn namespaced_stores_owned_copy_of_slice() -> VortexResult<()> {
+        let (coalesced, slice) = coalesced_slice();
+        let builder = NamespacedMokaSegmentCacheBuilder::new(1 << 20);
+        let cache = builder.cache_for(&identity("s3://bucket/a.vortex", "e1"));
+        cache.put(segment(1), slice.clone()).await?;
+
+        let cached = cache.get(segment(1)).await?.vortex_expect("cached");
+        assert_eq!(cached, slice);
+        assert_eq!(cached.alignment(), slice.alignment());
+        assert!(!shares_allocation(&cached, &coalesced));
+        Ok(())
     }
 
     #[tokio::test]
