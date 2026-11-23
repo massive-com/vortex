@@ -20,7 +20,11 @@ use vortex_metrics::Label;
 use vortex_metrics::MetricBuilder;
 use vortex_metrics::MetricsRegistry;
 use vortex_utils::aliases::dash_map::DashMap;
+use vortex_utils::aliases::hash_set::HashSet;
 
+use crate::DynLayout;
+use crate::layouts::zoned::LegacyStats;
+use crate::layouts::zoned::Zoned;
 use crate::segments::SegmentFuture;
 use crate::segments::SegmentId;
 use crate::segments::SegmentSource;
@@ -203,25 +207,47 @@ impl<B: SegmentCacheBuilder> SegmentCacheBuilder for InstrumentedSegmentCacheBui
             self.labels.clone(),
         ))
     }
+
+    fn scope(&self) -> SegmentCacheScope {
+        self.inner.scope()
+    }
 }
 
 /// [`SegmentSource`] wrapper that consults a [`SegmentCache`] before the underlying source.
 pub struct SegmentCacheSourceAdapter {
     cache: SharedSegmentCache,
     source: Arc<dyn SegmentSource>,
+    /// Segments that may use the cache. `None` means every segment.
+    cacheable: Option<Arc<HashSet<SegmentId>>>,
 }
 
 impl SegmentCacheSourceAdapter {
     /// Construct a cache-fronted source.
     pub fn new(cache: SharedSegmentCache, source: Arc<dyn SegmentSource>) -> Self {
-        Self { cache, source }
+        Self {
+            cache,
+            source,
+            cacheable: None,
+        }
+    }
+
+    /// Restrict the cache to `cacheable` segments. Other segments go to the source directly:
+    /// they are not looked up, not stored, and not counted in cache metrics.
+    pub fn with_cacheable_segments(mut self, cacheable: Option<HashSet<SegmentId>>) -> Self {
+        self.cacheable = cacheable.map(Arc::new);
+        self
     }
 }
 
 impl SegmentSource for SegmentCacheSourceAdapter {
     fn request(&self, id: SegmentId) -> SegmentFuture {
-        let cache = Arc::clone(&self.cache);
         let delegate = self.source.request(id);
+        if let Some(cacheable) = &self.cacheable
+            && !cacheable.contains(&id)
+        {
+            return delegate;
+        }
+        let cache = Arc::clone(&self.cache);
 
         async move {
             if let Ok(Some(segment)) = cache.get(id).await {
@@ -239,6 +265,57 @@ impl SegmentSource for SegmentCacheSourceAdapter {
         }
         .boxed()
     }
+}
+
+/// Which segments of a file may enter the [`SegmentCache`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SegmentCacheScope {
+    /// Cache every segment that is read.
+    #[default]
+    All,
+    /// Cache only zone-map segments: the `zones` child of a zoned layout. Data segments are
+    /// read from the source every time.
+    ZoneMaps,
+}
+
+impl SegmentCacheScope {
+    /// Return the segments of `layout` that may use the cache, or `None` for every segment.
+    pub fn cacheable_segments(
+        self,
+        layout: &dyn DynLayout,
+    ) -> VortexResult<Option<HashSet<SegmentId>>> {
+        match self {
+            Self::All => Ok(None),
+            Self::ZoneMaps => {
+                let mut segments = HashSet::default();
+                collect_zone_map_segments(layout, &mut segments)?;
+                Ok(Some(segments))
+            }
+        }
+    }
+}
+
+/// Add the segment IDs of every zone-map subtree in `layout` to `segments`.
+fn collect_zone_map_segments(
+    layout: &dyn DynLayout,
+    segments: &mut HashSet<SegmentId>,
+) -> VortexResult<()> {
+    if layout.is::<Zoned>() || layout.is::<LegacyStats>() {
+        // Slot 0 holds the data, slot 1 holds the zone map.
+        if let Some(data) = layout.slot(0)? {
+            collect_zone_map_segments(data.as_ref(), segments)?;
+        }
+        if let Some(zones) = layout.slot(1)? {
+            for node in zones.depth_first_traversal() {
+                segments.extend(node?.segment_ids());
+            }
+        }
+        return Ok(());
+    }
+    for child in layout.children()? {
+        collect_zone_map_segments(child.as_ref(), segments)?;
+    }
+    Ok(())
 }
 
 /// Identity of an opened Vortex file, used to scope cross-file [`SegmentCache`] entries.
@@ -278,6 +355,11 @@ pub enum FileVersion {
 pub trait SegmentCacheBuilder: Send + Sync {
     /// Return a [`SegmentCache`] scoped to `file`.
     fn cache_for(&self, file: &FileIdentity) -> SharedSegmentCache;
+
+    /// Which segments of a file may enter the caches that this builder returns.
+    fn scope(&self) -> SegmentCacheScope {
+        SegmentCacheScope::All
+    }
 }
 
 /// A [`SegmentCacheBuilder`] that returns [`NoOpSegmentCache`] for every file.
@@ -298,6 +380,7 @@ impl SegmentCacheBuilder for NoOpSegmentCacheBuilder {
 /// and therefore produce a fresh file ID, which is the desired behavior.
 pub struct NamespacedMokaSegmentCacheBuilder {
     inner: Arc<NamespacedMokaInner>,
+    scope: SegmentCacheScope,
 }
 
 struct NamespacedMokaInner {
@@ -322,7 +405,14 @@ impl NamespacedMokaSegmentCacheBuilder {
                 file_ids: DashMap::default(),
                 next_file_id: AtomicU32::new(0),
             }),
+            scope: SegmentCacheScope::All,
         }
+    }
+
+    /// Restrict the caches of this builder to the segments in `scope`.
+    pub fn with_scope(mut self, scope: SegmentCacheScope) -> Self {
+        self.scope = scope;
+        self
     }
 }
 
@@ -337,6 +427,10 @@ impl SegmentCacheBuilder for NamespacedMokaSegmentCacheBuilder {
             file_id,
             cache: inner.cache.clone(),
         })
+    }
+
+    fn scope(&self) -> SegmentCacheScope {
+        self.scope
     }
 }
 
@@ -409,6 +503,63 @@ mod tests {
         let slice = coalesced.slice(4096..4096 + 128);
         assert!(shares_allocation(&slice, &coalesced));
         (coalesced, slice)
+    }
+
+    /// Source that returns a one-byte buffer holding the segment ID.
+    struct IdSource;
+
+    impl SegmentSource for IdSource {
+        fn request(&self, id: SegmentId) -> SegmentFuture {
+            let byte = u8::try_from(*id).vortex_expect("test segment IDs fit in u8");
+            futures::future::ready(Ok(BufferHandle::new_host(buf(byte)))).boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_caches_only_cacheable_segments() -> VortexResult<()> {
+        let cache = Arc::new(MokaSegmentCache::new(1 << 20));
+        let adapter = SegmentCacheSourceAdapter::new(
+            Arc::<MokaSegmentCache>::clone(&cache),
+            Arc::new(IdSource),
+        )
+        .with_cacheable_segments(Some(HashSet::from_iter([segment(1)])));
+
+        adapter.request(segment(1)).await?;
+        adapter.request(segment(2)).await?;
+
+        assert_eq!(cache.get(segment(1)).await?, Some(buf(1)));
+        assert!(cache.get(segment(2)).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn adapter_without_restriction_caches_every_segment() -> VortexResult<()> {
+        let cache = Arc::new(MokaSegmentCache::new(1 << 20));
+        let adapter = SegmentCacheSourceAdapter::new(
+            Arc::<MokaSegmentCache>::clone(&cache),
+            Arc::new(IdSource),
+        )
+        .with_cacheable_segments(None);
+
+        adapter.request(segment(1)).await?;
+        adapter.request(segment(2)).await?;
+
+        assert_eq!(cache.get(segment(1)).await?, Some(buf(1)));
+        assert_eq!(cache.get(segment(2)).await?, Some(buf(2)));
+        Ok(())
+    }
+
+    #[test]
+    fn instrumented_builder_keeps_inner_scope() {
+        let registry: Arc<dyn MetricsRegistry> = Arc::new(DefaultMetricsRegistry::default());
+        let inner =
+            NamespacedMokaSegmentCacheBuilder::new(1 << 20).with_scope(SegmentCacheScope::ZoneMaps);
+        let builder = InstrumentedSegmentCacheBuilder::new(inner, registry, vec![]);
+        assert_eq!(builder.scope(), SegmentCacheScope::ZoneMaps);
+        assert_eq!(
+            NamespacedMokaSegmentCacheBuilder::new(1 << 20).scope(),
+            SegmentCacheScope::All
+        );
     }
 
     #[tokio::test]
