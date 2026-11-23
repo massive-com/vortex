@@ -242,7 +242,9 @@ impl FileOpener for VortexOpener {
 
             if let Some(builder) = segment_cache_builder {
                 let identity = file_identity(&file.object_meta);
-                open_opts = open_opts.with_segment_cache(builder.cache_for(&identity));
+                open_opts = open_opts
+                    .with_segment_cache(builder.cache_for(&identity))
+                    .with_segment_cache_scope(builder.scope());
             }
 
             let vxf = open_opts

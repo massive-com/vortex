@@ -17,6 +17,7 @@ use vortex_io::VortexReadAt;
 use vortex_io::session::RuntimeSessionExt;
 use vortex_layout::segments::InstrumentedSegmentCache;
 use vortex_layout::segments::NoOpSegmentCache;
+use vortex_layout::segments::SegmentCacheScope;
 use vortex_layout::segments::SegmentCacheSourceAdapter;
 use vortex_layout::segments::SegmentId;
 use vortex_layout::segments::SegmentSource;
@@ -59,6 +60,8 @@ pub struct VortexOpenOptions {
     session: VortexSession,
     /// Cache to use for file segments.
     segment_cache: Option<SharedSegmentCache>,
+    /// Which segments may enter the segment cache.
+    segment_cache_scope: SegmentCacheScope,
     /// The number of bytes to read when parsing the footer.
     initial_read_size: usize,
     /// An optional, externally provided, file size.
@@ -86,6 +89,7 @@ pub trait OpenOptionsSessionExt:
         VortexOpenOptions {
             session: self.session(),
             segment_cache: None,
+            segment_cache_scope: SegmentCacheScope::All,
             initial_read_size: INITIAL_READ_SIZE,
             file_size: None,
             dtype: None,
@@ -144,6 +148,15 @@ impl VortexOpenOptions {
     /// [`SegmentCacheBuilder`]: vortex_layout::segments::SegmentCacheBuilder
     pub fn with_segment_cache(mut self, segment_cache: SharedSegmentCache) -> Self {
         self.segment_cache = Some(segment_cache);
+        self
+    }
+
+    /// Configure which segments may enter the segment cache.
+    ///
+    /// With [`SegmentCacheScope::ZoneMaps`], only zone-map segments use the cache. Data segments
+    /// are read from the file every time.
+    pub fn with_segment_cache_scope(mut self, scope: SegmentCacheScope) -> Self {
+        self.segment_cache_scope = scope;
         self
     }
 
@@ -337,10 +350,13 @@ impl VortexOpenOptions {
         )));
 
         // Wrap up the segment source to first resolve segments from the initial read cache.
-        let segment_source: Arc<dyn SegmentSource> = Arc::new(SegmentCacheSourceAdapter::new(
-            segment_cache,
-            segment_source,
-        ));
+        let cacheable = self
+            .segment_cache_scope
+            .cacheable_segments(footer.layout().as_ref())?;
+        let segment_source: Arc<dyn SegmentSource> = Arc::new(
+            SegmentCacheSourceAdapter::new(segment_cache, segment_source)
+                .with_cacheable_segments(cacheable),
+        );
 
         let metadata = if self.include_metadata {
             resolve_metadata(&footer, Arc::clone(&segment_source)).await?
