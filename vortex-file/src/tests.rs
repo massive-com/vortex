@@ -88,11 +88,16 @@ use vortex_layout::layouts::zoned::LegacyStats;
 use vortex_layout::layouts::zoned::Zoned;
 use vortex_layout::scan::scan_builder::ScanBuilder;
 use vortex_layout::scan::split_by::SplitBy;
+use vortex_layout::segments::MokaSegmentCache;
+use vortex_layout::segments::SegmentCache;
+use vortex_layout::segments::SegmentCacheScope;
+use vortex_layout::segments::SegmentId;
 use vortex_layout::session::LayoutSession;
 use vortex_scan::strict_sorted_buffer::StrictSortedBuffer;
 use vortex_session::VortexSession;
 use vortex_zigzag::ZigZag;
 
+use crate::Footer;
 use crate::MAX_POSTSCRIPT_SIZE;
 use crate::OpenOptionsSessionExt;
 use crate::V1_FOOTER_FBS_SIZE;
@@ -2861,5 +2866,82 @@ async fn limit_zero_with_filter_yields_no_rows() -> VortexResult<()> {
         .await?;
 
     assert_eq!(result.len(), 0);
+    Ok(())
+}
+
+/// Write a two-column file with zone maps, scan it with a filter through a segment cache of the
+/// given scope, and return the file footer and the IDs of the segments that ended up in the cache.
+async fn cached_segments_after_filtered_scan(
+    scope: SegmentCacheScope,
+) -> VortexResult<(Footer, Vec<SegmentId>)> {
+    let n = 100_000;
+    let numbers = PrimitiveArray::from_iter(0..n).into_array();
+    let floats = PrimitiveArray::from_iter((0..n).map(|i| f64::from(i) * 0.1)).into_array();
+    let st = StructArray::from_fields(&[("numbers", numbers), ("floats", floats)])?;
+
+    let mut buf = ByteBufferMut::empty();
+    let summary = SESSION
+        .write_options()
+        .write(&mut buf, st.into_array().to_array_stream())
+        .await?;
+    let footer = summary.footer().clone();
+
+    let cache = Arc::new(MokaSegmentCache::new(1 << 30));
+    // Pass the footer so that no segment comes from the initial footer read.
+    let file = SESSION
+        .open_options()
+        .with_footer(footer.clone())
+        .with_segment_cache(Arc::<MokaSegmentCache>::clone(&cache))
+        .with_segment_cache_scope(scope)
+        .open_read(buf.freeze())
+        .await?;
+    let result = file
+        .scan()?
+        .with_filter(bind_scan_expr(
+            &file,
+            gt_eq(get_item("numbers", root()), lit(90_000i32)),
+        ))
+        .into_array_stream()?
+        .read_all()
+        .await?;
+    assert_eq!(result.len(), 10_000);
+
+    let mut cached = Vec::new();
+    for id in 0..footer.segment_map().len() {
+        let id = SegmentId::from(u32::try_from(id).vortex_expect("segment count fits in u32"));
+        if cache.get(id).await?.is_some() {
+            cached.push(id);
+        }
+    }
+    Ok((footer, cached))
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn segment_cache_zone_map_scope_stores_only_zone_maps() -> VortexResult<()> {
+    let (footer, cached) = cached_segments_after_filtered_scan(SegmentCacheScope::ZoneMaps).await?;
+    let zone_maps = SegmentCacheScope::ZoneMaps
+        .cacheable_segments(footer.layout().as_ref())?
+        .vortex_expect("zone map scope returns a segment set");
+
+    assert!(!zone_maps.is_empty());
+    assert!(zone_maps.len() < footer.segment_map().len());
+    assert!(!cached.is_empty(), "the filter reads zone maps");
+    assert!(cached.iter().all(|id| zone_maps.contains(id)), "{cached:?}");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn segment_cache_all_scope_stores_data_segments() -> VortexResult<()> {
+    let (footer, cached) = cached_segments_after_filtered_scan(SegmentCacheScope::All).await?;
+    let zone_maps = SegmentCacheScope::ZoneMaps
+        .cacheable_segments(footer.layout().as_ref())?
+        .vortex_expect("zone map scope returns a segment set");
+
+    assert!(
+        cached.iter().any(|id| !zone_maps.contains(id)),
+        "{cached:?}"
+    );
     Ok(())
 }
