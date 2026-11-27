@@ -19,7 +19,7 @@ lance = { version = "10", default-features = false }
 lance-encoding = { version = "10" }
 
 anyhow = { workspace = true }
-arrow-cast = { version = "58" }
+arrow-cast = { version = "58.3.0" }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }
