@@ -575,19 +575,48 @@ fn can_be_pushed_down_impl(expr: &Arc<dyn PhysicalExpr>, schema: &Schema) -> boo
     }
 }
 
-/// Returns false for casts that Vortex cannot run on rows.
+/// Returns true for casts that Vortex can run on rows.
 ///
-/// Vortex has no cast kernel between strings and other types, for example from an integer to a
-/// string (<https://github.com/vortex-data/vortex/issues/6211>). A pushed-down filter with such a
-/// cast fails when the scan runs, so it must stay in DataFusion. All other casts are allowed,
-/// including the casts that the schema adapter adds for schema differences, because the opener
-/// requires every accepted filter to be pushed down again after the adapter rewrote it.
+/// Vortex runs a cast in one of two ways: a `CastKernel` for a canonical array, or a `CastReduce`
+/// rule for a constant array (a chunk where the column has one value). The two ways support
+/// different pairs of types, and a pushed-down filter with a cast that one way cannot run fails
+/// the scan. This rule accepts a cast only if Vortex runs it both ways, for example an integer to
+/// a string fails (<https://github.com/vortex-data/vortex/issues/6211>). The other casts stay in
+/// DataFusion.
+///
+/// Casts between two struct types or two list types are also accepted. The schema adapter adds
+/// them for schema differences between the table and a file, and the opener requires every
+/// accepted filter to be pushed down again after the adapter rewrote it.
+///
+/// The test `test_vortex_cast_support_matrix` checks this rule against the casts that Vortex runs.
+/// It fails when a Vortex upgrade adds or removes a cast.
 fn is_supported_cast(from: &DataType, to: &DataType) -> bool {
+    use DataType::*;
+
     let from = match from {
-        DataType::Dictionary(_, value_type) => value_type.as_ref(),
+        Dictionary(_, value_type) => value_type.as_ref(),
         other => other,
     };
-    from.is_string() == to.is_string()
+    if from == to {
+        return true;
+    }
+    let is_binary = |data_type: &DataType| matches!(data_type, Binary | LargeBinary | BinaryView);
+    let is_decimal = |data_type: &DataType| matches!(data_type, Decimal128(..) | Decimal256(..));
+    match from {
+        Struct(_) => matches!(to, Struct(_)),
+        _ if from.is_list() => to.is_list(),
+        _ if from.is_string() => to.is_string(),
+        _ if is_binary(from) => is_binary(to),
+        _ if from.is_integer() => to.is_integer() || to.is_floating() || is_decimal(to),
+        // The constant array path has no cast from a half float to a signed integer.
+        Float16 => to.is_unsigned_integer() || to.is_floating(),
+        Float32 | Float64 => to.is_integer() || to.is_floating(),
+        _ if is_decimal(from) => matches!(to, Float64) || is_decimal(to),
+        // A temporal type casts only to its storage type, not to another temporal type.
+        Date32 | Time32(_) => matches!(to, Int32),
+        Date64 | Time64(_) | Timestamp(..) => matches!(to, Int64),
+        _ => false,
+    }
 }
 
 /// Checks if an expression type is one that convert() can handle.
@@ -781,6 +810,7 @@ mod tests {
     use arrow_schema::TimeUnit as ArrowTimeUnit;
     use datafusion::arrow::array::AsArray;
     use datafusion::arrow::array::Int64Array;
+    use datafusion::arrow::array::StringArray;
     use datafusion::arrow::compute::cast as arrow_cast;
     use datafusion::arrow::datatypes::Int32Type;
     use datafusion_common::ScalarValue;
@@ -1246,6 +1276,24 @@ mod tests {
     #[case::timestamp_unit(
         DataType::Timestamp(ArrowTimeUnit::Microsecond, None),
         DataType::Timestamp(ArrowTimeUnit::Nanosecond, None),
+        false
+    )]
+    #[case::timestamp_to_storage(
+        DataType::Timestamp(ArrowTimeUnit::Millisecond, None),
+        DataType::Int64,
+        true
+    )]
+    #[case::same_timestamp(
+        DataType::Timestamp(ArrowTimeUnit::Nanosecond, Some("UTC".into())),
+        DataType::Timestamp(ArrowTimeUnit::Nanosecond, Some("UTC".into())),
+        true
+    )]
+    #[case::bool_to_int(DataType::Boolean, DataType::Int32, false)]
+    #[case::decimal_to_int(DataType::Decimal128(12, 2), DataType::Int64, false)]
+    #[case::int_to_date(DataType::Int32, DataType::Date32, false)]
+    #[case::list_items(
+        DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+        DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
         true
     )]
     #[case::int_to_string(DataType::Int64, DataType::Utf8, false)]
@@ -1272,48 +1320,107 @@ mod tests {
     /// The types of the cast support matrix. The labels keep the expected tables below
     /// independent of the Arrow display format.
     fn cast_matrix_types() -> Vec<(&'static str, DataType)> {
+        let utc = || Some("UTC".into());
         vec![
             ("bool", DataType::Boolean),
+            ("i8", DataType::Int8),
+            ("i16", DataType::Int16),
             ("i32", DataType::Int32),
             ("i64", DataType::Int64),
             ("u8", DataType::UInt8),
+            ("u16", DataType::UInt16),
+            ("u32", DataType::UInt32),
+            ("u64", DataType::UInt64),
+            ("f16", DataType::Float16),
             ("f32", DataType::Float32),
             ("f64", DataType::Float64),
             ("decimal", DataType::Decimal128(12, 2)),
+            ("decimal_wide", DataType::Decimal128(20, 4)),
+            ("decimal_narrow", DataType::Decimal128(10, 2)),
+            ("decimal256", DataType::Decimal256(40, 2)),
             ("utf8", DataType::Utf8),
             ("utf8_view", DataType::Utf8View),
             ("large_utf8", DataType::LargeUtf8),
             ("binary", DataType::Binary),
+            ("binary_view", DataType::BinaryView),
+            ("large_binary", DataType::LargeBinary),
             ("date32", DataType::Date32),
+            ("time32_ms", DataType::Time32(ArrowTimeUnit::Millisecond)),
+            ("date64", DataType::Date64),
+            ("time64_us", DataType::Time64(ArrowTimeUnit::Microsecond)),
             (
                 "timestamp_ms",
                 DataType::Timestamp(ArrowTimeUnit::Millisecond, None),
             ),
             (
+                "timestamp_us",
+                DataType::Timestamp(ArrowTimeUnit::Microsecond, None),
+            ),
+            (
+                "timestamp_ns",
+                DataType::Timestamp(ArrowTimeUnit::Nanosecond, None),
+            ),
+            (
+                "timestamp_ms_utc",
+                DataType::Timestamp(ArrowTimeUnit::Millisecond, utc()),
+            ),
+            (
                 "timestamp_ns_utc",
-                DataType::Timestamp(ArrowTimeUnit::Nanosecond, Some("UTC".into())),
+                DataType::Timestamp(ArrowTimeUnit::Nanosecond, utc()),
+            ),
+            (
+                "timestamp_ns_new_york",
+                DataType::Timestamp(ArrowTimeUnit::Nanosecond, Some("America/New_York".into())),
             ),
         ]
     }
 
+    /// Groups of type labels. A table entry can name a group with its `@` label.
+    const CAST_MATRIX_GROUPS: &[(&str, &str)] = &[
+        ("@ints", "i8 i16 i32 i64 u8 u16 u32 u64"),
+        ("@floats", "f16 f32 f64"),
+        (
+            "@decimals",
+            "decimal decimal_wide decimal_narrow decimal256",
+        ),
+        ("@strings", "utf8 utf8_view large_utf8"),
+        ("@binaries", "binary binary_view large_binary"),
+        // Temporal types with 32-bit storage.
+        ("@temporal32", "date32 time32_ms"),
+        // Temporal types with 64-bit storage.
+        (
+            "@temporal64",
+            "date64 time64_us timestamp_ms timestamp_us timestamp_ns timestamp_ms_utc \
+             timestamp_ns_utc timestamp_ns_new_york",
+        ),
+    ];
+
     /// The casts that Vortex runs on a canonical array (with a `CastKernel`), per source type.
     const VORTEX_CANONICAL_CASTS: &[(&str, &str)] = &[
-        ("bool", "bool i32 i64 u8 f32 f64"),
-        ("i32", "i32 i64 u8 f32 f64 decimal"),
-        ("i64", "i32 i64 u8 f32 f64 decimal"),
-        ("u8", "i32 i64 u8 f32 f64 decimal"),
-        ("f32", "i32 i64 u8 f32 f64"),
-        ("f64", "i32 i64 u8 f32 f64"),
-        ("decimal", "f64 decimal"),
-        ("utf8", "utf8 utf8_view large_utf8"),
-        ("utf8_view", "utf8 utf8_view large_utf8"),
-        ("large_utf8", "utf8 utf8_view large_utf8"),
-        ("binary", "binary"),
-        ("date32", "i32 i64 u8 f32 f64 decimal date32"),
-        ("timestamp_ms", "i32 i64 u8 f32 f64 decimal timestamp_ms"),
+        ("bool", "bool @ints @floats"),
+        ("@ints", "@ints @floats @decimals"),
+        ("@floats", "@ints @floats"),
+        ("@decimals", "f64 @decimals"),
+        ("@strings", "@strings"),
+        ("@binaries", "@binaries"),
+        ("date32", "date32 @ints @floats @decimals"),
+        ("time32_ms", "time32_ms @ints @floats @decimals"),
+        ("date64", "date64 @ints @floats @decimals"),
+        ("time64_us", "time64_us @ints @floats @decimals"),
+        ("timestamp_ms", "timestamp_ms @ints @floats @decimals"),
+        ("timestamp_us", "timestamp_us @ints @floats @decimals"),
+        ("timestamp_ns", "timestamp_ns @ints @floats @decimals"),
+        (
+            "timestamp_ms_utc",
+            "timestamp_ms_utc @ints @floats @decimals",
+        ),
         (
             "timestamp_ns_utc",
-            "i32 i64 u8 f32 f64 decimal timestamp_ns_utc",
+            "timestamp_ns_utc @ints @floats @decimals",
+        ),
+        (
+            "timestamp_ns_new_york",
+            "timestamp_ns_new_york @ints @floats @decimals",
         ),
     ];
 
@@ -1321,50 +1428,51 @@ mod tests {
     /// type. A filter on a column chunk with one value takes this path.
     const VORTEX_CONSTANT_CASTS: &[(&str, &str)] = &[
         ("bool", "bool"),
+        ("@ints", "@ints @floats @decimals @temporal32 @temporal64"),
+        ("f16", "u8 u16 u32 u64 @floats"),
+        ("f32", "@ints @floats @temporal32 @temporal64"),
+        ("f64", "@ints @floats @temporal32 @temporal64"),
         (
-            "i32",
-            "i32 i64 u8 f32 f64 decimal date32 timestamp_ms timestamp_ns_utc",
+            "@decimals",
+            "@ints @floats @decimals @temporal32 @temporal64",
         ),
-        (
-            "i64",
-            "i32 i64 u8 f32 f64 decimal date32 timestamp_ms timestamp_ns_utc",
-        ),
-        (
-            "u8",
-            "i32 i64 u8 f32 f64 decimal date32 timestamp_ms timestamp_ns_utc",
-        ),
-        (
-            "f32",
-            "i32 i64 u8 f32 f64 date32 timestamp_ms timestamp_ns_utc",
-        ),
-        (
-            "f64",
-            "i32 i64 u8 f32 f64 date32 timestamp_ms timestamp_ns_utc",
-        ),
-        (
-            "decimal",
-            "i32 i64 u8 f32 f64 decimal date32 timestamp_ms timestamp_ns_utc",
-        ),
-        ("utf8", "utf8 utf8_view large_utf8"),
-        ("utf8_view", "utf8 utf8_view large_utf8"),
-        ("large_utf8", "utf8 utf8_view large_utf8"),
-        ("binary", "binary"),
-        ("date32", "i32 date32"),
-        ("timestamp_ms", "i64 timestamp_ms timestamp_ns_utc"),
-        ("timestamp_ns_utc", "i64 timestamp_ms timestamp_ns_utc"),
+        ("@strings", "@strings"),
+        ("@binaries", "@binaries"),
+        ("@temporal32", "i32 @temporal32"),
+        ("@temporal64", "i64 @temporal64"),
     ];
+
+    /// Replaces each `@` group label in `labels` with the type labels of the group.
+    fn expand_cast_labels(labels: &str) -> Vec<&str> {
+        labels
+            .split_whitespace()
+            .flat_map(|label| {
+                CAST_MATRIX_GROUPS
+                    .iter()
+                    .find(|(group, _)| *group == label)
+                    .map_or_else(
+                        || vec![label],
+                        |(_, members)| members.split_whitespace().collect(),
+                    )
+            })
+            .collect()
+    }
 
     /// Returns true if `table` lists the cast from `from` to `to`.
     fn is_listed_cast(table: &[(&str, &str)], from: &str, to: &str) -> bool {
-        table
-            .iter()
-            .any(|(source, targets)| *source == from && targets.split(' ').any(|t| t == to))
+        table.iter().any(|(sources, targets)| {
+            expand_cast_labels(sources).contains(&from) && expand_cast_labels(targets).contains(&to)
+        })
     }
 
     /// Runs the Vortex cast from `from` to `to` on a canonical array and on a constant array.
     /// Returns whether each path succeeds.
     fn run_vortex_cast(session: &VortexSession, from: &DataType, to: &DataType) -> (bool, bool) {
-        let source = arrow_cast(&Int64Array::from(vec![1, 2]), from).unwrap();
+        // Arrow casts integers to all matrix types except the binary view, which it casts from
+        // strings.
+        let source = arrow_cast(&Int64Array::from(vec![1, 2]), from)
+            .or_else(|_| arrow_cast(&StringArray::from(vec!["1", "2"]), from))
+            .unwrap();
         let array = session
             .arrow()
             .from_arrow_array(source, &Field::new("v", from.clone(), true))
@@ -1385,13 +1493,12 @@ mod tests {
         (runs(array), runs(constant))
     }
 
-    /// Detects changes in the casts that Vortex supports.
+    /// Detects changes in the casts that Vortex supports, and checks `is_supported_cast`.
     ///
     /// The test runs the real Vortex cast for every pair of types in the matrix and compares the
     /// result with the tables above. A Vortex upgrade that adds or removes a cast kernel makes
-    /// this test fail. Then update the tables and check if `is_supported_cast` can accept more
-    /// casts. The test also fails if `is_supported_cast` rejects a cast that Vortex runs on both
-    /// paths.
+    /// this test fail. Then update the tables and `is_supported_cast`. The test also requires
+    /// that `is_supported_cast` accepts exactly the casts that Vortex runs both ways.
     #[test]
     fn test_vortex_cast_support_matrix() {
         let session = VortexSession::default();
@@ -1415,10 +1522,12 @@ mod tests {
                          VORTEX_CONSTANT_CASTS says {expected_constant}"
                     ));
                 }
-                if canonical && constant && !is_supported_cast(from, to) {
+                let accepted = is_supported_cast(from, to);
+                if accepted != (canonical && constant) {
                     differences.push(format!(
-                        "{from_label} -> {to_label}: Vortex runs the cast on both paths, \
-                         but is_supported_cast rejects it"
+                        "{from_label} -> {to_label}: is_supported_cast = {accepted}, \
+                         but Vortex runs the canonical cast = {canonical} and the constant \
+                         cast = {constant}"
                     ));
                 }
             }
