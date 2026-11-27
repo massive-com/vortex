@@ -2827,16 +2827,17 @@ async fn limit_with_filter_straddles_split_boundary() -> VortexResult<()> {
 
     let result = file
         .scan()?
+        .with_split_by(SplitBy::RowCount(100))
         .with_filter(bind_scan_expr(
             &file,
             gt_eq(get_item("n", root()), lit(0_i32)),
         ))
         .with_limit(250)
         .into_array_stream()?
-        .read_all()
+        .try_collect::<Vec<_>>()
         .await?;
 
-    assert_eq!(result.len(), 250);
+    assert_eq!(n_values(result)?, (0..250).collect::<Vec<_>>());
 
     Ok(())
 }
@@ -2866,6 +2867,138 @@ async fn limit_zero_with_filter_yields_no_rows() -> VortexResult<()> {
         .await?;
 
     assert_eq!(result.len(), 0);
+    Ok(())
+}
+
+/// Writes a file with one `n: i32` column with the values `0..400`.
+async fn four_split_file() -> VortexResult<VortexFile> {
+    let chunks = (0..4)
+        .map(|chunk_idx| {
+            let base = chunk_idx * 100;
+            (base..base + 100).collect::<PrimitiveArray>().into_array()
+        })
+        .collect::<Vec<_>>();
+    let numbers = ChunkedArray::from_iter(chunks).into_array();
+    let array = StructArray::from_fields(&[("n", numbers)])?.into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    SESSION.open_options().open_buffer(buf)
+}
+
+/// Starts a scan of [`four_split_file`] with one split per 100 rows.
+fn scan_in_four_splits(file: &VortexFile) -> VortexResult<ScanBuilder<ArrayRef>> {
+    let scan = file.scan()?.with_split_by(SplitBy::RowCount(100));
+    let splits = scan.full_file_splits()?;
+    assert_eq!(splits, [0, 100, 200, 300, 400], "expected 4 splits");
+    Ok(scan)
+}
+
+/// Returns the values of column `n` of the scanned chunks, in output order.
+fn n_values(chunks: impl IntoIterator<Item = ArrayRef>) -> VortexResult<Vec<i32>> {
+    let mut ctx = SESSION.create_execution_ctx();
+    let mut values = Vec::new();
+    for chunk in chunks {
+        let chunk = chunk.execute::<StructArray>(&mut ctx)?;
+        let numbers = chunk
+            .unmasked_field(0)
+            .clone()
+            .execute::<PrimitiveArray>(&mut ctx)?;
+        values.extend_from_slice(numbers.as_slice::<i32>());
+    }
+    Ok(values)
+}
+
+/// The filter `50 <= n < 350` matches rows in all 4 splits.
+fn range_filter(file: &VortexFile) -> BoundExpression {
+    bind_scan_expr(
+        file,
+        and(
+            gt_eq(get_item("n", root()), lit(50_i32)),
+            lt(get_item("n", root()), lit(350_i32)),
+        ),
+    )
+}
+
+/// An ordered scan with a filter and a limit returns the first matching rows in scan order. A
+/// reversed scan returns the last matching rows, in reverse order.
+#[rstest]
+#[case::native_one_split(false, 1, 30, (50..80).collect())]
+#[case::native_across_splits(false, 4, 120, (50..170).collect())]
+#[case::reversed_one_split(true, 1, 30, (320..350).rev().collect())]
+#[case::reversed_across_splits(true, 4, 120, (230..350).rev().collect())]
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn ordered_limit_with_filter_returns_first_rows_in_scan_order(
+    #[case] reversed: bool,
+    #[case] concurrency: usize,
+    #[case] limit: u64,
+    #[case] expected: Vec<i32>,
+) -> VortexResult<()> {
+    let file = four_split_file().await?;
+    let chunks = scan_in_four_splits(&file)?
+        .with_filter(range_filter(&file))
+        .with_ordered(true)
+        .with_reversed(reversed)
+        .with_concurrency(concurrency)
+        .with_limit(limit)
+        .into_array_stream()?
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    assert_eq!(n_values(chunks)?, expected);
+    Ok(())
+}
+
+/// The split tasks of an ordered scan finish in any order. This test completes them in reverse
+/// task order. The limit must still go to the first matching rows in scan order.
+#[rstest]
+#[case::native(false, (50..170).collect())]
+#[case::reversed(true, (230..350).rev().collect())]
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn ordered_limit_with_filter_ignores_task_completion_order(
+    #[case] reversed: bool,
+    #[case] expected: Vec<i32>,
+) -> VortexResult<()> {
+    let file = four_split_file().await?;
+    let tasks = scan_in_four_splits(&file)?
+        .with_filter(range_filter(&file))
+        .with_ordered(true)
+        .with_reversed(reversed)
+        .with_limit(120)
+        .build()?;
+    assert!(tasks.len() >= 4, "expected a task per split");
+
+    // `join_all` polls the futures in the order of the vector, so the last task runs first.
+    let mut outputs = futures::future::join_all(tasks.into_iter().rev()).await;
+    outputs.reverse();
+    let chunks = outputs
+        .into_iter()
+        .collect::<VortexResult<Vec<_>>>()?
+        .into_iter()
+        .flatten();
+
+    assert_eq!(n_values(chunks)?, expected);
+    Ok(())
+}
+
+/// A reversed scan without a filter returns the last rows of the file.
+#[tokio::test]
+#[cfg_attr(miri, ignore)]
+async fn reversed_limit_without_filter_returns_last_rows() -> VortexResult<()> {
+    let file = four_split_file().await?;
+    let chunks = scan_in_four_splits(&file)?
+        .with_reversed(true)
+        .with_limit(130)
+        .into_array_stream()?
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    assert_eq!(n_values(chunks)?, (270..400).rev().collect::<Vec<_>>());
     Ok(())
 }
 

@@ -699,6 +699,38 @@ impl Mask {
         }
     }
 
+    /// Limit the mask to the last `limit` true values.
+    ///
+    /// A reversed scan reads a range in natural order and reverses the rows afterwards, so it
+    /// must keep the last selected rows of the range, not the first.
+    pub fn limit_last(self, limit: usize) -> Self {
+        if self.len() <= limit {
+            return self;
+        }
+
+        match &self {
+            Mask::AllTrue(len) => {
+                Self::from_iter([Self::new_false(len - limit), Self::new_true(limit)])
+            }
+            Mask::AllFalse(_) => self,
+            Mask::Values(mask_values) => {
+                let true_count = mask_values.true_count();
+                if limit >= true_count {
+                    return self;
+                }
+
+                let existing_buffer = mask_values.bit_buffer();
+                let mut new_buffer_builder = BitBufferMut::new_unset(mask_values.len());
+                for index in existing_buffer.set_indices().skip(true_count - limit) {
+                    // SAFETY: `index` comes from a buffer of the same length.
+                    unsafe { new_buffer_builder.set_unchecked(index) }
+                }
+
+                Self::from(new_buffer_builder.freeze())
+            }
+        }
+    }
+
     /// Concatenate multiple masks together into a single mask.
     pub fn concat<'a>(masks: impl Iterator<Item = &'a Self>) -> VortexResult<Self> {
         let masks: Vec<_> = masks.collect();

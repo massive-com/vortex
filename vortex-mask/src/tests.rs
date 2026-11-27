@@ -212,6 +212,44 @@ fn test_limit_mask_zero() {
     assert_eq!(limited.true_count(), 0);
 }
 
+#[test]
+fn limit_last_all_true_mask() {
+    let all_true = Mask::new_true(4);
+    let limited_mask = all_true.clone().limit_last(2);
+    assert_eq!(
+        limited_mask.bit_buffer(),
+        AllOr::Some(&BitBuffer::from_iter([false, false, true, true]))
+    );
+    assert_eq!(all_true.clone().limit_last(5), all_true);
+    assert!(all_true.limit_last(0).all_false());
+}
+
+#[test]
+fn limit_last_mask_values() {
+    let original_mask = Mask::from_iter([true, true, false, true, false, true]);
+
+    assert_eq!(
+        original_mask.clone().limit_last(2).bit_buffer(),
+        AllOr::Some(&BitBuffer::from_iter([
+            false, false, false, true, false, true
+        ]))
+    );
+    assert_eq!(
+        original_mask.clone().limit_last(3).bit_buffer(),
+        AllOr::Some(&BitBuffer::from_iter([
+            false, true, false, true, false, true
+        ]))
+    );
+    assert_eq!(original_mask.clone().limit_last(4), original_mask);
+    assert!(original_mask.limit_last(0).all_false());
+}
+
+#[test]
+fn limit_last_all_false_mask() {
+    let all_false = Mask::new_false(10);
+    assert_eq!(all_false.clone().limit_last(5), all_false);
+}
+
 // Buffer conversion tests
 #[test]
 fn test_mask_to_bit_buffer() {
