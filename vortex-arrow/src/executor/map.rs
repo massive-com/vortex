@@ -249,8 +249,8 @@ mod tests {
         let DataType::Struct(fields) = entries_field.data_type() else {
             panic!("expected Arrow map entries struct, got {entries_field:?}");
         };
-        assert_eq!(fields[0].name(), "keys");
-        assert_eq!(fields[1].name(), "values");
+        assert_eq!(fields[0].name(), "key");
+        assert_eq!(fields[1].name(), "value");
 
         let expected_dtype = DType::map(
             DType::Utf8(NonNullable),

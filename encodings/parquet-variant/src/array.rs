@@ -115,10 +115,13 @@ impl ParquetVariant {
         let storage = arrow_variant.inner();
         let mut value_nullable = false;
         let mut typed_value_nullable = false;
-        for field in storage.fields() {
+        // Arrow allows nulls in a non-nullable child at the rows where the parent is null, and
+        // `variant_get` returns such a `value` child. Import a child with nulls as nullable.
+        for (field, column) in storage.fields().iter().zip(storage.columns()) {
+            let nullable = field.is_nullable() || column.null_count() > 0;
             match field.name().as_str() {
-                "value" => value_nullable = field.is_nullable(),
-                "typed_value" => typed_value_nullable = field.is_nullable(),
+                "value" => value_nullable = nullable,
+                "typed_value" => typed_value_nullable = nullable,
                 _ => {}
             }
         }
