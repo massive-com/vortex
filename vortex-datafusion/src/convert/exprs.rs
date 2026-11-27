@@ -548,8 +548,13 @@ fn can_be_pushed_down_impl(expr: &Arc<dyn PhysicalExpr>, schema: &Schema) -> boo
     } else if let Some(lit) = expr.downcast_ref::<df_expr::Literal>() {
         supported_data_types(&lit.value().data_type())
     } else if let Some(cast_expr) = expr.downcast_ref::<df_expr::CastExpr>() {
-        // CastExpr child must be an expression type that convert() can handle
+        // CastExpr child must be an expression type that convert() can handle, and Vortex must
+        // be able to run the cast itself.
         is_convertible_expr(cast_expr.expr())
+            && cast_expr
+                .expr()
+                .data_type(schema)
+                .is_ok_and(|from| is_supported_cast(&from, cast_expr.target_field().data_type()))
     } else if let Some(is_null) = expr.downcast_ref::<df_expr::IsNullExpr>() {
         can_be_pushed_down_impl(is_null.arg(), schema)
     } else if let Some(is_not_null) = expr.downcast_ref::<df_expr::IsNotNullExpr>() {
@@ -570,6 +575,21 @@ fn can_be_pushed_down_impl(expr: &Arc<dyn PhysicalExpr>, schema: &Schema) -> boo
     }
 }
 
+/// Returns false for casts that Vortex cannot run on rows.
+///
+/// Vortex has no cast kernel between strings and other types, for example from an integer to a
+/// string (<https://github.com/vortex-data/vortex/issues/6211>). A pushed-down filter with such a
+/// cast fails when the scan runs, so it must stay in DataFusion. All other casts are allowed,
+/// including the casts that the schema adapter adds for schema differences, because the opener
+/// requires every accepted filter to be pushed down again after the adapter rewrote it.
+fn is_supported_cast(from: &DataType, to: &DataType) -> bool {
+    let from = match from {
+        DataType::Dictionary(_, value_type) => value_type.as_ref(),
+        other => other,
+    };
+    from.is_string() == to.is_string()
+}
+
 /// Checks if an expression type is one that convert() can handle.
 /// This is less restrictive than can_be_pushed_down since it only checks
 /// expression types, not data type support.
@@ -586,7 +606,8 @@ fn is_convertible_expr(expr: &Arc<dyn PhysicalExpr>) -> bool {
         || expr.downcast_ref::<df_expr::IsNotNullExpr>().is_some()
         || expr.downcast_ref::<df_expr::InListExpr>().is_some()
         || expr.downcast_ref::<ScalarFunctionExpr>().is_some_and(|sf| {
-            ScalarFunctionExpr::try_downcast_func::<GetFieldFunc>(sf).is_some()
+            ScalarFunctionExpr::try_downcast_func::<GetFieldFunc>(sf)
+                .is_some_and(can_get_field_be_pushed_down)
                 || ScalarFunctionExpr::try_downcast_func::<OctetLengthFunc>(sf).is_some()
                 || ScalarFunctionExpr::try_downcast_func::<ArrayLength>(sf).is_some()
         })
@@ -652,7 +673,9 @@ fn supported_data_types(dt: &DataType) -> bool {
 /// Checks if a scalar function can be pushed down.
 /// Currently GetFieldFunc, OctetLengthFunc, and ArrayLength are supported.
 fn can_scalar_fn_be_pushed_down(scalar_fn: &ScalarFunctionExpr, schema: &Schema) -> bool {
-    if ScalarFunctionExpr::try_downcast_func::<GetFieldFunc>(scalar_fn).is_some() {
+    if ScalarFunctionExpr::try_downcast_func::<GetFieldFunc>(scalar_fn)
+        .is_some_and(can_get_field_be_pushed_down)
+    {
         return true;
     }
 
@@ -664,6 +687,36 @@ fn can_scalar_fn_be_pushed_down(scalar_fn: &ScalarFunctionExpr, schema: &Schema)
 
     ScalarFunctionExpr::try_downcast_func::<ArrayLength>(scalar_fn)
         .is_some_and(|array_length| can_array_length_be_pushed_down(array_length, schema))
+}
+
+/// Checks that `convert` can build a `get_item` chain for a `get_field` call.
+///
+/// The field names must be string literals, and the fields must come from a column, from a
+/// cast of a supported source (the schema adapter casts struct columns), or from another
+/// supported `get_field` call. Any other source, for example a struct that a user-defined
+/// function returns, has no Vortex expression, so the scan would fail when it opens the file.
+fn can_get_field_be_pushed_down(get_field: &ScalarFunctionExpr) -> bool {
+    let Some((source, field_names)) = get_field.args().split_first() else {
+        return false;
+    };
+    field_names.iter().all(|name| {
+        name.downcast_ref::<df_expr::Literal>()
+            .is_some_and(|literal| literal.value().try_as_str().flatten().is_some())
+    }) && is_get_field_source(source)
+}
+
+/// Checks that `convert` supports `expr` as the source of a `get_field` call.
+fn is_get_field_source(expr: &Arc<dyn PhysicalExpr>) -> bool {
+    expr.downcast_ref::<df_expr::Column>().is_some()
+        || expr
+            .downcast_ref::<df_expr::CastExpr>()
+            .is_some_and(|cast_expr| is_get_field_source(cast_expr.expr()))
+        || expr
+            .downcast_ref::<ScalarFunctionExpr>()
+            .is_some_and(|scalar_fn| {
+                ScalarFunctionExpr::try_downcast_func::<GetFieldFunc>(scalar_fn)
+                    .is_some_and(can_get_field_be_pushed_down)
+            })
 }
 
 fn can_octet_length_be_pushed_down(scalar_fn: &ScalarFunctionExpr, schema: &Schema) -> bool {
@@ -732,6 +785,7 @@ mod tests {
     use datafusion_common::config::ConfigOptions;
     use datafusion_expr::Operator as DFOperator;
     use datafusion_expr::ScalarUDF;
+    use datafusion_functions::core::named_struct::NamedStructFunc;
     use datafusion_physical_expr::PhysicalExpr;
     use datafusion_physical_plan::expressions as df_expr;
     use insta::assert_snapshot;
@@ -1171,6 +1225,57 @@ mod tests {
         assert!(!can_be_pushed_down_impl(&array_length, &test_schema));
     }
 
+    #[rstest]
+    #[case::int_widening(DataType::Int32, DataType::Int64, true)]
+    #[case::int_to_float(DataType::Int32, DataType::Float64, true)]
+    #[case::decimal_scale(DataType::Decimal128(12, 2), DataType::Decimal128(30, 15), true)]
+    #[case::string_to_view(DataType::Utf8, DataType::Utf8View, true)]
+    #[case::dictionary_to_string(
+        DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+        DataType::Utf8,
+        true
+    )]
+    #[case::timestamp_unit(
+        DataType::Timestamp(ArrowTimeUnit::Microsecond, None),
+        DataType::Timestamp(ArrowTimeUnit::Nanosecond, None),
+        true
+    )]
+    #[case::int_to_string(DataType::Int64, DataType::Utf8, false)]
+    #[case::string_to_int(DataType::Utf8, DataType::Int64, false)]
+    #[case::int_to_decimal(DataType::Int64, DataType::Decimal128(20, 2), true)]
+    #[case::struct_fields(
+        DataType::Struct(vec![Field::new("a", DataType::Int32, true)].into()),
+        DataType::Struct(vec![Field::new("a", DataType::Int64, true)].into()),
+        true
+    )]
+    #[case::timestamp_to_string(
+        DataType::Timestamp(ArrowTimeUnit::Millisecond, None),
+        DataType::Utf8,
+        false
+    )]
+    fn test_is_supported_cast(
+        #[case] from: DataType,
+        #[case] to: DataType,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(is_supported_cast(&from, &to), expected);
+    }
+
+    #[rstest]
+    fn test_can_be_pushed_down_cast(test_schema: Schema) {
+        let id = Arc::new(df_expr::Column::new("id", 0)) as Arc<dyn PhysicalExpr>;
+        let to_int64 = Arc::new(df_expr::CastExpr::new(
+            Arc::clone(&id),
+            DataType::Int64,
+            None,
+        )) as Arc<dyn PhysicalExpr>;
+        let to_string =
+            Arc::new(df_expr::CastExpr::new(id, DataType::Utf8, None)) as Arc<dyn PhysicalExpr>;
+
+        assert!(can_be_pushed_down_impl(&to_int64, &test_schema));
+        assert!(!can_be_pushed_down_impl(&to_string, &test_schema));
+    }
+
     // https://github.com/vortex-data/vortex/issues/6211
     #[tokio::test]
     async fn test_cast_int_to_string() -> anyhow::Result<()> {
@@ -1194,6 +1299,15 @@ mod tests {
             .show()
             .await?;
 
+        // Vortex cannot cast an integer to a string, so this filter must stay in DataFusion.
+        let rows = ctx
+            .session
+            .sql(r#"select id from 'example.vortex' where cast(id as string) like '%1'"#)
+            .await?
+            .collect()
+            .await?;
+        assert_eq!(rows.iter().map(|b| b.num_rows()).sum::<usize>(), 1);
+
         // This fails as it pushes string cast to the scan
         ctx.session
             .sql(r#"select cast(id as string) from 'example.vortex'"#)
@@ -1202,6 +1316,65 @@ mod tests {
             .await?;
 
         Ok(())
+    }
+
+    fn get_field_expr(source: Arc<dyn PhysicalExpr>, schema: &Schema) -> Arc<dyn PhysicalExpr> {
+        Arc::new(
+            ScalarFunctionExpr::try_new(
+                Arc::new(ScalarUDF::from(GetFieldFunc::new())),
+                vec![
+                    source,
+                    Arc::new(df_expr::Literal::new(ScalarValue::from("a"))),
+                ],
+                schema,
+                Arc::new(ConfigOptions::new()),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// `convert` builds a field access only from a column, a cast, or another field access. A
+    /// filter on a field of a struct that a function returns must stay in DataFusion. Before, the
+    /// source accepted it and the scan failed with "Unsupported ScalarFunctionExpr".
+    #[test]
+    fn test_can_be_pushed_down_get_field_source() {
+        let struct_type = DataType::Struct(vec![Field::new("a", DataType::Int32, true)].into());
+        let schema = Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("meta", struct_type.clone(), true),
+        ]);
+        let id = Arc::new(df_expr::Column::new("id", 0)) as Arc<dyn PhysicalExpr>;
+        let meta = Arc::new(df_expr::Column::new("meta", 1)) as Arc<dyn PhysicalExpr>;
+        let named_struct = Arc::new(
+            ScalarFunctionExpr::try_new(
+                Arc::new(ScalarUDF::from(NamedStructFunc::new())),
+                vec![Arc::new(df_expr::Literal::new(ScalarValue::from("a"))), id],
+                &schema,
+                Arc::new(ConfigOptions::new()),
+            )
+            .unwrap(),
+        ) as Arc<dyn PhysicalExpr>;
+        let cast_meta = Arc::new(df_expr::CastExpr::new(Arc::clone(&meta), struct_type, None))
+            as Arc<dyn PhysicalExpr>;
+        let greater_than_two = |field: Arc<dyn PhysicalExpr>| -> Arc<dyn PhysicalExpr> {
+            Arc::new(df_expr::BinaryExpr::new(
+                field,
+                DFOperator::Gt,
+                Arc::new(df_expr::Literal::new(ScalarValue::Int32(Some(2)))),
+            ))
+        };
+
+        let of_column = greater_than_two(get_field_expr(meta, &schema));
+        let of_cast = greater_than_two(get_field_expr(cast_meta, &schema));
+        let of_function = greater_than_two(get_field_expr(named_struct, &schema));
+
+        let convertor = DefaultExpressionConvertor::default();
+        for supported in [&of_column, &of_cast] {
+            assert!(can_be_pushed_down_impl(supported, &schema), "{supported}");
+            assert!(convertor.convert(supported.as_ref()).is_ok(), "{supported}");
+        }
+        assert!(!can_be_pushed_down_impl(&of_function, &schema));
+        assert!(convertor.convert(of_function.as_ref()).is_err());
     }
 
     /// A cast whose target is a UUID-tagged `FixedSizeBinary(16)` must resolve
