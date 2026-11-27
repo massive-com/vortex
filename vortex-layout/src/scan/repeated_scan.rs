@@ -9,6 +9,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use futures::Stream;
+use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use itertools::Either;
 use itertools::Itertools;
@@ -21,6 +22,7 @@ use vortex_array::stream::ArrayStream;
 use vortex_array::stream::ArrayStreamAdapter;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
+use vortex_error::vortex_err;
 use vortex_io::runtime::BlockingRuntime;
 use vortex_io::session::RuntimeSessionExt;
 use vortex_scan::selection::Selection;
@@ -30,6 +32,7 @@ use vortex_utils::parallelism::get_available_parallelism;
 use crate::LayoutReaderRef;
 use crate::scan::filter::FilterExpr;
 use crate::scan::splits::Splits;
+use crate::scan::tasks::SplitLimit;
 use crate::scan::tasks::TaskContext;
 use crate::scan::tasks::split_exec;
 
@@ -125,6 +128,10 @@ impl<A: 'static + Send> RepeatedScan<A> {
         }
     }
 
+    /// Constructs a task per row split. See [`ScanBuilder::build`] for the order in which to
+    /// poll the tasks.
+    ///
+    /// [`ScanBuilder::build`]: crate::scan::scan_builder::ScanBuilder::build
     pub fn execute(
         &self,
         row_range: Option<Range<u64>>,
@@ -177,10 +184,27 @@ impl<A: 'static + Send> RepeatedScan<A> {
             }),
         };
 
-        // Promote the scalar limit to a shared atomic counter so that the limit can be applied
-        // safely across both the synchronous no-filter path and the asynchronous filter path.
-        // All tasks share this counter and reserve from it atomically.
-        let limit = self.limit.map(|l| Arc::new(AtomicU64::new(l)));
+        // An ordered scan with a filter must give the limit to the first matching rows in scan
+        // order. The filters of the splits finish in any order, so the splits reserve in a chain:
+        // each split waits for the remaining count of the previous split.
+        //
+        // All other scans share one atomic counter. Without a filter, each split reserves when
+        // its task is built below, which is in scan order. An unordered scan may emit any rows.
+        let chained = self.filter.is_some() && (self.ordered || self.reversed);
+        let shared_limit = self
+            .limit
+            .filter(|_| !chained)
+            .map(|l| Arc::new(AtomicU64::new(l)));
+        let mut chain_previous = match self.limit.filter(|_| chained) {
+            Some(limit) => {
+                let (first_sender, first_receiver) = oneshot::channel();
+                first_sender
+                    .send(limit)
+                    .map_err(|_| vortex_err!("Failed to start the scan limit chain"))?;
+                Some(first_receiver)
+            }
+            None => None,
+        };
         let mut tasks = Vec::new();
         let ctx = Arc::new(TaskContext {
             selection: self.selection.clone(),
@@ -188,6 +212,7 @@ impl<A: 'static + Send> RepeatedScan<A> {
             reader: Arc::clone(&self.layout_reader),
             projection: self.projection.clone(),
             mapper: Arc::clone(&self.map_fn),
+            reversed: self.reversed,
         });
 
         let ranges = if self.reversed {
@@ -204,14 +229,22 @@ impl<A: 'static + Send> RepeatedScan<A> {
             // The counter only ever decreases, so if a previous split has already drained it
             // we can stop building tasks. Splits whose IO is already in flight will still
             // observe the empty counter and short-circuit.
-            if limit
+            if shared_limit
                 .as_ref()
                 .is_some_and(|l| l.load(Ordering::Acquire) == 0)
             {
                 break;
             }
 
-            tasks.push(split_exec(Arc::clone(&ctx), range, limit.clone())?);
+            let split_limit = match chain_previous.take() {
+                Some(previous) => {
+                    let (next, next_receiver) = oneshot::channel();
+                    chain_previous = Some(next_receiver);
+                    Some(SplitLimit::Chained { previous, next })
+                }
+                None => shared_limit.clone().map(SplitLimit::Shared),
+            };
+            tasks.push(split_exec(Arc::clone(&ctx), range, split_limit)?);
         }
 
         Ok(tasks)
